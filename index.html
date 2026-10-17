@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f8fa">
+    <title>Growtopia Stock Tracker</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #202a35;
+        --muted: #77818d;
+        --line: #e8ebef;
+        --paper: #fff;
+        --canvas: #f7f8fa;
+        --green: #227a57;
+        --green-soft: #eaf5ef;
+        --red: #bd5148;
+        --amber: #a36e16;
+        --shadow: 0 2px 10px rgb(26 39 51 / 4%);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .pin-gate { display: grid; min-height: 100vh; place-items: center; padding: 24px; }
+      .pin-card { width: min(400px, 100%); padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: var(--shadow); }
+      .pin-card h1 { margin-top: 22px; }
+      .pin-card p { color: var(--muted); }
+      .pin-note { font-size: 12px; }
+      .pin-form { display: grid; gap: 12px; margin-top: 22px; }
+      .pin-form input { height: 44px; padding: 0 12px; border: 1px solid #dfe3e7; border-radius: 7px; }
+      .pin-error { margin: 0; color: var(--red) !important; }
+      [hidden] { display: none !important; }
+
+      button, input, select { font: inherit; }
+      button { cursor: pointer; }
+
+      .topbar {
+        height: 68px;
+        padding: 0 max(24px, calc((100vw - 1120px) / 2));
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--paper);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand { display: flex; align-items: center; gap: 11px; font-weight: 700; letter-spacing: -.03em; }
+      .brand-mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--green-soft);
+        color: var(--green);
+        font-size: 18px;
+      }
+      .datetime { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+      .clock { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+      main { width: min(1120px, calc(100% - 48px)); margin: 38px auto 64px; }
+      .main-nav { display: flex; gap: 6px; margin-bottom: 22px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+      .nav-button { padding: 9px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-weight: 600; }
+      .nav-button[aria-current="page"] { background: var(--green-soft); color: var(--green); }
+      .heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 25px; }
+      .heading-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+      h1 { margin: 0; font-size: clamp(25px, 4vw, 31px); letter-spacing: -.045em; line-height: 1.2; }
+      .subtitle { margin: 7px 0 0; color: var(--muted); }
+      .button {
+        min-height: 40px;
+        padding: 0 15px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+        color: var(--ink);
+        font-weight: 600;
+        transition: background .15s, border-color .15s;
+      }
+      .button:hover { border-color: #cbd2d9; background: #fbfcfd; }
+      .button-primary { border-color: var(--green); background: var(--green); color: white; }
+      .button-primary:hover { border-color: #196444; background: #196444; }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      .summary-card, .panel { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: var(--shadow); }
+      .summary-card { min-height: 118px; padding: 19px 21px; }
+      .summary-label { color: var(--muted); font-size: 13px; font-weight: 500; }
+      .summary-value { display: block; margin-top: 8px; font-size: 29px; font-weight: 700; letter-spacing: -.04em; line-height: 1.1; }
+      .summary-note { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+      .panel { overflow: hidden; }
+      .panel + .panel { margin-top: 22px; }
+      .panel-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 19px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+      h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
+      .panel-description { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+      .toolbar { display: flex; align-items: center; gap: 9px; }
+      .search {
+        width: 200px;
+        height: 36px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        outline: none;
+      }
+      input:focus, select:focus { border-color: #78a992; box-shadow: 0 0 0 3px rgb(34 122 87 / 10%); outline: none; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; text-align: left; }
+      th { padding: 11px 22px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .055em; text-transform: uppercase; }
+      td { padding: 14px 22px; border-top: 1px solid #f0f2f4; vertical-align: middle; }
+      tbody tr:first-child td { border-top: 0; }
+      .item-name { font-weight: 600; }
+      .quantity { font-weight: 600; }
+      .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 12px; font-weight: 600; white-space: nowrap; }
+      .badge::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
+      .badge-low { background: #fff4e3; color: var(--amber); }
+      .badge-out { background: #fceceb; color: var(--red); }
+      .row-actions { display: flex; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+      .text-button { padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--green); font-size: 12px; font-weight: 600; }
+      .text-button:hover { background: var(--green-soft); }
+      .text-button-danger { color: var(--red); }
+      .text-button-danger:hover { background: #fceceb; }
+      .empty-state { padding: 35px 20px; color: var(--muted); text-align: center; }
+      .sales-total { color: var(--green); font-weight: 700; }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .toast {
+        position: fixed;
+        right: 22px;
+        bottom: 22px;
+        z-index: 5;
+        max-width: min(420px, calc(100vw - 32px));
+        padding: 12px 16px;
+        border-radius: 9px;
+        background: #26332d;
+        color: white;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 15%);
+      }
+      .toast[hidden] { display: none; }
+
+      dialog {
+        width: min(440px, calc(100% - 32px));
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        box-shadow: 0 20px 60px rgb(23 31 37 / 18%);
+      }
+      dialog::backdrop { background: rgb(22 29 35 / 35%); }
+      .dialog-header { padding: 20px 22px 15px; border-bottom: 1px solid var(--line); }
+      .dialog-header h2 { font-size: 18px; }
+      .dialog-body { display: grid; gap: 14px; padding: 19px 22px; }
+      .field { display: grid; gap: 6px; color: #4c5863; font-size: 12px; font-weight: 600; }
+      .field input, .field select {
+        width: 100%;
+        height: 40px;
+        padding: 0 11px;
+        border: 1px solid #dfe3e7;
+        border-radius: 7px;
+        background: white;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 400;
+      }
+      .dialog-footer { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 22px 20px; }
+
+      @media (max-width: 680px) {
+        .topbar { height: 60px; padding: 0 18px; }
+        main { width: calc(100% - 32px); margin-top: 27px; }
+        .main-nav { margin-bottom: 18px; }
+        .heading { align-items: flex-start; flex-direction: column; }
+        .heading-actions { width: 100%; }
+        .summary { gap: 9px; }
+        .summary-card { min-height: 100px; padding: 14px; }
+        .summary-value { font-size: 24px; }
+        .summary-note { font-size: 11px; }
+        .panel-heading { align-items: flex-start; flex-direction: column; padding: 16px; }
+        .toolbar { width: 100%; }
+        .search { flex: 1; min-width: 0; }
+        th, td { padding-right: 14px; padding-left: 14px; }
+      }
+      @media (max-width: 410px) {
+        .summary { grid-template-columns: 1fr; }
+        .summary-card { min-height: auto; }
+        .summary-value { display: inline-block; margin-right: 8px; }
+        .summary-note { display: inline; }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="pin-gate" id="pin-gate" aria-labelledby="pin-heading">
+      <div class="pin-card">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">▦</span><span>Stockroom</span></div>
+        <h1 id="pin-heading">Welcome back</h1>
+        <p>Enter your PIN to open your Growtopia stock tracker.</p>
+        <form class="pin-form" id="pin-form">
+          <label class="field">Access PIN<input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required autofocus></label>
+          <p class="pin-error" id="pin-error" role="alert" hidden>Incorrect PIN. Please try again.</p>
+          <button class="button button-primary" type="submit">Continue</button>
+        </form>
+        <p class="pin-note">This PIN screen is only a casual deterrent; it does not securely protect your data.</p>
+      </div>
+    </section>
+    <div id="app-shell" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">▦</span><span>Stockroom</span></div>
+      <div class="datetime">
+        <time id="today"></time>
+        <time class="clock" id="clock" aria-label="Current time"></time>
+      </div>
+    </header>
+
+    <main>
+      <nav class="main-nav" aria-label="Main navigation">
+        <button class="nav-button" type="button" data-view="stock-view" aria-current="page">Inventory &amp; Sales</button>
+        <button class="nav-button" type="button" data-view="farming-view">Farming</button>
+      </nav>
+      <div id="stock-view">
+      <section class="heading" aria-labelledby="page-title">
+        <h1 id="page-title">Item Stock</h1>
+        <div class="heading-actions">
+          <button class="button" id="add-product-button" type="button">＋ Add Product</button>
+          <button class="button button-primary" id="record-sale-button" type="button">＋ &nbsp;Record Sale</button>
+        </div>
+      </section>
+
+      <section class="summary" aria-label="Store summary">
+        <article class="summary-card">
+          <span class="summary-label">Stock Total</span>
+          <strong class="summary-value" id="stock-total">0</strong>
+          <span class="summary-note" id="stock-note">From 0 types of items</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Sales Revenue</span>
+          <strong class="summary-value" id="sales-revenue">0 WL</strong>
+          <span class="summary-note">Total sales in World Lock</span>
+        </article>
+      </section>
+
+      <section class="panel" aria-labelledby="inventory-heading">
+        <div class="panel-heading">
+          <h2 id="inventory-heading">Inventory</h2>
+          <div class="toolbar">
+            <input class="search" id="inventory-search" type="search" placeholder="Search items..." aria-label="Search inventory">
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Item</th><th scope="col">Price per Bundle</th><th scope="col">Stock</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody id="inventory-rows"></tbody>
+          </table>
+          <div class="empty-state" id="inventory-empty" hidden>No items available. Add an item to get started.</div>
+          <div class="empty-state" id="search-empty" hidden>Item not found.</div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="sales-heading">
+        <div class="panel-heading">
+          <h2 id="sales-heading">Recent Sales</h2>
+          <div class="toolbar">
+            <input class="search" id="sales-search" type="search" placeholder="Search sales..." aria-label="Search recent sales">
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Item</th><th scope="col">Date</th><th scope="col">Items Sold</th><th scope="col">Total (WL)</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody id="sales-rows"></tbody>
+          </table>
+          <div class="empty-state" id="sales-empty" hidden>No sales recorded yet. Record a sale to see it here.</div>
+          <div class="empty-state" id="sales-search-empty" hidden>Sale not found.</div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="activity-heading">
+        <div class="panel-heading">
+          <div>
+            <h2 id="activity-heading">Activity Log</h2>
+            <p class="panel-description">A record of inventory and sales changes.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Activity</th><th scope="col">Date</th></tr></thead>
+            <tbody id="activity-rows"></tbody>
+          </table>
+          <div class="empty-state" id="activity-empty" hidden>No activity recorded yet.</div>
+        </div>
+      </section>
+      </div>
+
+      <section id="farming-view" aria-labelledby="farming-heading" hidden>
+        <section class="heading" aria-labelledby="farming-heading">
+          <div>
+            <h1 id="farming-heading">Farming Tracker</h1>
+            <p class="subtitle">Track completed harvests and countdowns for each farm world.</p>
+          </div>
+          <button class="button button-primary" id="add-farm-button" type="button">＋ Add Farm</button>
+        </section>
+        <section class="panel" aria-labelledby="farm-list-heading">
+          <div class="panel-heading">
+            <div>
+              <h2 id="farm-list-heading">Your Farms</h2>
+              <p class="panel-description">Checking “Harvest finished” starts a countdown and cannot be undone. When the timer ends, the checkbox is ready for the next harvest.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">World</th><th scope="col">Item</th><th scope="col">Grow Time</th><th scope="col">Harvest Status</th><th scope="col">Harvest Finished</th></tr></thead>
+              <tbody id="farm-rows"></tbody>
+            </table>
+            <div class="empty-state" id="farm-empty" hidden>No farms yet. Add a farm world to start tracking harvests.</div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="product-dialog" aria-labelledby="product-dialog-title">
+      <form id="product-form">
+        <div class="dialog-header"><h2 id="product-dialog-title">Add Product</h2></div>
+        <div class="dialog-body">
+          <label class="field">Item Name<input name="name" required maxlength="80" placeholder="Example: World Lock"></label>
+          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
+          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" placeholder="1"></label>
+          <label class="field">Initial Stock Quantity<input name="quantity" type="number" required min="0" step="1" value="0"></label>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Add Product</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="sale-dialog" aria-labelledby="sale-dialog-title">
+      <form id="sale-form">
+        <div class="dialog-header"><h2 id="sale-dialog-title">Record Sale</h2></div>
+        <div class="dialog-body">
+          <label class="field">Item<select name="product" id="sale-product" required></select></label>
+          <label class="field">Items Sold<input name="quantity" type="number" required min="1" step="1" value="1"></label>
+          <p id="sale-total-preview" class="panel-description" aria-live="polite" style="margin:0"></p>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Record Sale</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="adjust-dialog" aria-labelledby="adjust-dialog-title">
+      <form id="adjust-form">
+        <div class="dialog-header"><h2 id="adjust-dialog-title">Adjust Stock</h2></div>
+        <div class="dialog-body">
+          <p id="adjust-product-name" style="margin:0;color:#77818d"></p>
+          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1"></label>
+          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01"></label>
+          <label class="field">New Stock Quantity<input name="quantity" type="number" required min="0" step="1"></label>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Save Changes</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="farm-dialog" aria-labelledby="farm-dialog-title">
+      <form id="farm-form">
+        <div class="dialog-header"><h2 id="farm-dialog-title">Add Farm</h2></div>
+        <div class="dialog-body">
+          <label class="field">World Name<input name="world" required maxlength="80" placeholder="Example: Chandelier Farm"></label>
+          <label class="field">Item to Harvest<input name="item" required maxlength="80" placeholder="Example: Chandelier"></label>
+          <label class="field">Grow Time (minutes)<input name="durationMinutes" type="number" required min="1" step="1" value="60"></label>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Add Farm</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+
+    <script>
+      (() => {
+        const PIN_SHA256 = "__STOCKROOM_PIN_SHA256__";
+        const PIN_SESSION_KEY = "stockroom-pin-unlocked";
+        const STORAGE_KEY = "stockroom-data-v1";
+        const LOW_STOCK_THRESHOLD = 5;
+        const worldLocks = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+        const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" });
+        const dateOnlyFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
+        const clockFormat = new Intl.DateTimeFormat("en-US", { timeStyle: "medium" });
+        const formatWorldLocks = (amount) => `${worldLocks.format(amount)} WL`;
+        const defaultData = { products: [], sales: [], logs: [], farms: [] };
+        const byId = (id) => document.getElementById(id);
+        const productDialog = byId("product-dialog");
+        const saleDialog = byId("sale-dialog");
+        const adjustDialog = byId("adjust-dialog");
+        const farmDialog = byId("farm-dialog");
+        let state = loadData();
+        let adjustingProductId = null;
+        let toastTimer;
+        const farmTimers = new Map();
+        const farmCheckboxes = new Map();
+
+        const pinGate = byId("pin-gate");
+        const appShell = byId("app-shell");
+        const pinForm = byId("pin-form");
+        if (sessionStorage.getItem(PIN_SESSION_KEY) === "1") {
+          pinGate.hidden = true;
+          appShell.hidden = false;
+        }
+
+        pinForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const pin = pinForm.elements.pin.value;
+          try {
+            const bytes = new TextEncoder().encode(pin);
+            const digest = await crypto.subtle.digest("SHA-256", bytes);
+            const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+            if (hash !== PIN_SHA256) {
+              byId("pin-error").hidden = false;
+              pinForm.elements.pin.select();
+              return;
+            }
+            sessionStorage.setItem(PIN_SESSION_KEY, "1");
+            pinGate.hidden = true;
+            appShell.hidden = false;
+          } catch (error) {
+            byId("pin-error").textContent = `PIN verification failed: ${error.message}`;
+            byId("pin-error").hidden = false;
+          }
+        });
+
+        function loadData() {
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (!saved) return structuredClone(defaultData);
+            const parsed = JSON.parse(saved);
+            if (!parsed || !Array.isArray(parsed.products) || !Array.isArray(parsed.sales)) {
+              throw new Error("Saved inventory data has an invalid format.");
+            }
+            if (parsed.logs === undefined) parsed.logs = [];
+            if (!Array.isArray(parsed.logs)) throw new Error("Saved activity log has an invalid format.");
+            if (parsed.farms === undefined) parsed.farms = [];
+            if (!Array.isArray(parsed.farms)) throw new Error("Saved farm tracker data has an invalid format.");
+            for (const product of parsed.products) {
+              if (product.unitsPerPrice === undefined) product.unitsPerPrice = 1;
+              if (!Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1) {
+                throw new Error(`Saved bundle quantity for ${product.name} is invalid.`);
+              }
+            }
+            for (const farm of parsed.farms) {
+              if (!farm || typeof farm.id !== "string" || typeof farm.world !== "string" ||
+                typeof farm.item !== "string" || !Number.isInteger(farm.durationMinutes) ||
+                farm.durationMinutes < 1 ||
+                (farm.harvestStartedAt !== null && farm.harvestStartedAt !== undefined &&
+                  !Number.isFinite(Date.parse(farm.harvestStartedAt)))) {
+                throw new Error("Saved farm tracker contains invalid farm data.");
+              }
+              if (farm.harvestStartedAt === undefined) farm.harvestStartedAt = null;
+            }
+            return parsed;
+          } catch (error) {
+            window.setTimeout(() => showToast(`Could not load saved data: ${error.message}`), 0);
+            return structuredClone(defaultData);
+          }
+        }
+
+        function saveData() {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            return true;
+          } catch (error) {
+            showToast(`Could not save changes in this browser: ${error.message}`);
+            return false;
+          }
+        }
+
+        function showToast(message) {
+          const toast = byId("toast");
+          toast.textContent = message;
+          toast.hidden = false;
+          window.clearTimeout(toastTimer);
+          toastTimer = window.setTimeout(() => { toast.hidden = true; }, 4000);
+        }
+
+        function makeCell(text, className) {
+          const cell = document.createElement("td");
+          cell.textContent = text;
+          if (className) cell.className = className;
+          return cell;
+        }
+
+        function addLog(message) {
+          state.logs.push({ message, date: new Date().toISOString() });
+        }
+
+        function formatBundlePrice(product) {
+          return `${formatItemQuantity(product.unitsPerPrice)} / ${formatWorldLocks(product.price)}`;
+        }
+
+        function formatItemQuantity(quantity) {
+          return `${quantity} ${quantity === 1 ? "item" : "items"}`;
+        }
+
+        function renderInventory() {
+          const body = byId("inventory-rows");
+          const query = byId("inventory-search").value.trim().toLowerCase();
+          body.replaceChildren();
+          const products = state.products.filter((product) => product.name.toLowerCase().includes(query));
+          for (const product of products) {
+            const row = document.createElement("tr");
+            const nameCell = document.createElement("td");
+            const name = document.createElement("span");
+            name.className = "item-name";
+            name.textContent = product.name;
+            nameCell.append(name);
+            row.append(nameCell, makeCell(formatBundlePrice(product)));
+            row.append(makeCell(String(product.quantity), "quantity"));
+            const statusCell = document.createElement("td");
+            const badge = document.createElement("span");
+            const status = product.quantity === 0 ? "Out of stock" : product.quantity <= LOW_STOCK_THRESHOLD ? "Low stock" : "In stock";
+            badge.className = `badge${product.quantity === 0 ? " badge-out" : product.quantity <= LOW_STOCK_THRESHOLD ? " badge-low" : ""}`;
+            badge.textContent = status;
+            statusCell.append(badge);
+            row.append(statusCell);
+
+            const actions = document.createElement("td");
+            const actionGroup = document.createElement("div");
+            actionGroup.className = "row-actions";
+            const adjustButton = document.createElement("button");
+            adjustButton.className = "text-button";
+            adjustButton.type = "button";
+            adjustButton.textContent = "Adjust";
+            adjustButton.setAttribute("aria-label", `Adjust stock for ${product.name}`);
+            adjustButton.addEventListener("click", () => openAdjustDialog(product));
+            const deleteButton = document.createElement("button");
+            deleteButton.className = "text-button text-button-danger";
+            deleteButton.type = "button";
+            deleteButton.textContent = "Remove";
+            deleteButton.setAttribute("aria-label", `Remove ${product.name}`);
+            deleteButton.addEventListener("click", () => removeProduct(product.id));
+            actionGroup.append(adjustButton, deleteButton);
+            actions.append(actionGroup);
+            row.append(actions);
+            body.append(row);
+          }
+          byId("inventory-empty").hidden = state.products.length > 0;
+          byId("search-empty").hidden = state.products.length === 0 || products.length > 0;
+        }
+
+        function renderSales() {
+          const body = byId("sales-rows");
+          body.replaceChildren();
+          const query = byId("sales-search").value.trim().toLowerCase();
+          const recentSales = [...state.sales].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
+          const sales = recentSales.filter((sale) =>
+            `${sale.productName} ${dateFormat.format(new Date(sale.date))} ${sale.quantity}`.toLowerCase().includes(query)
+          );
+          for (const sale of sales) {
+            const row = document.createElement("tr");
+            row.append(
+              makeCell(sale.productName),
+              makeCell(dateFormat.format(new Date(sale.date))),
+              makeCell(formatItemQuantity(sale.quantity)),
+              makeCell(formatWorldLocks(sale.total), "sales-total")
+            );
+            const actions = document.createElement("td");
+            const cancelButton = document.createElement("button");
+            cancelButton.className = "text-button text-button-danger";
+            cancelButton.type = "button";
+            cancelButton.textContent = "Cancel sale";
+            cancelButton.setAttribute("aria-label", `Cancel sale of ${sale.quantity} ${sale.productName}`);
+            cancelButton.addEventListener("click", () => cancelSale(sale.id));
+            actions.append(cancelButton);
+            row.append(actions);
+            body.append(row);
+          }
+          byId("sales-empty").hidden = state.sales.length > 0;
+          byId("sales-search-empty").hidden = state.sales.length === 0 || sales.length > 0;
+        }
+
+        function renderActivity() {
+          const body = byId("activity-rows");
+          body.replaceChildren();
+          const logs = [...state.logs].sort((a, b) => new Date(b.date) - new Date(a.date));
+          for (const log of logs) {
+            const row = document.createElement("tr");
+            row.append(
+              makeCell(log.message),
+              makeCell(dateFormat.format(new Date(log.date)))
+            );
+            body.append(row);
+          }
+          byId("activity-empty").hidden = state.logs.length > 0;
+        }
+
+        function renderFarms() {
+          const body = byId("farm-rows");
+          body.replaceChildren();
+          farmTimers.clear();
+          farmCheckboxes.clear();
+          for (const farm of state.farms) {
+            const row = document.createElement("tr");
+            const timerCell = document.createElement("td");
+            timerCell.dataset.farmTimer = farm.id;
+            const finishedCell = document.createElement("td");
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.setAttribute("aria-label", `Harvest finished for ${farm.item} in ${farm.world}`);
+            checkbox.addEventListener("change", () => completeHarvest(farm.id, checkbox));
+            finishedCell.append(checkbox);
+            row.append(
+              makeCell(farm.world),
+              makeCell(farm.item),
+              makeCell(`${farm.durationMinutes} minutes`),
+              timerCell,
+              finishedCell
+            );
+            body.append(row);
+            farmTimers.set(farm.id, timerCell);
+            farmCheckboxes.set(farm.id, checkbox);
+          }
+          byId("farm-empty").hidden = state.farms.length > 0;
+          updateFarmTimers();
+        }
+
+        function updateFarmTimers() {
+          const now = Date.now();
+          for (const farm of state.farms) {
+            const timerCell = farmTimers.get(farm.id);
+            const checkbox = farmCheckboxes.get(farm.id);
+            if (!timerCell || !checkbox) continue;
+            const remaining = farm.harvestStartedAt
+              ? farm.durationMinutes * 60_000 - (now - Date.parse(farm.harvestStartedAt))
+              : null;
+            if (remaining === null || remaining <= 0) {
+              timerCell.textContent = remaining === null ? "Not started" : "Ready to harvest";
+              checkbox.checked = false;
+              checkbox.disabled = false;
+              continue;
+            }
+            const totalSeconds = Math.ceil(remaining / 1000);
+            const days = Math.floor(totalSeconds / 86400);
+            const hours = Math.floor((totalSeconds % 86400) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            timerCell.textContent = [
+              days ? `${days}d` : "",
+              hours ? `${hours}h` : "",
+              minutes ? `${minutes}m` : "",
+              `${seconds}s`
+            ].filter(Boolean).join(" ");
+            checkbox.checked = true;
+            checkbox.disabled = true;
+          }
+        }
+
+        function completeHarvest(id, checkbox) {
+          const farm = state.farms.find((item) => item.id === id);
+          if (!farm || !checkbox.checked) return;
+          if (farm.harvestStartedAt && Date.now() - Date.parse(farm.harvestStartedAt) < farm.durationMinutes * 60_000) {
+            checkbox.checked = true;
+            checkbox.disabled = true;
+            return;
+          }
+          const previousHarvestStartedAt = farm.harvestStartedAt;
+          farm.harvestStartedAt = new Date().toISOString();
+          addLog(`Harvest completed for ${farm.item} in ${farm.world}. Grow timer started for ${farm.durationMinutes} minutes.`);
+          if (!saveData()) {
+            farm.harvestStartedAt = previousHarvestStartedAt;
+            state.logs.pop();
+            checkbox.checked = false;
+            return;
+          }
+          renderActivity();
+          updateFarmTimers();
+        }
+
+        function renderSummary() {
+          const stockCount = state.products.reduce((total, product) => total + product.quantity, 0);
+          const revenue = state.sales.reduce((total, sale) => total + sale.total, 0);
+          byId("stock-total").textContent = stockCount.toLocaleString("en-US");
+          byId("stock-note").textContent = `Across ${state.products.length} item${state.products.length === 1 ? "" : "s"}`;
+          byId("sales-revenue").textContent = formatWorldLocks(revenue);
+        }
+
+        function render() {
+          renderSummary();
+          renderInventory();
+          renderSales();
+          renderActivity();
+        }
+
+        function openAdjustDialog(product) {
+          adjustingProductId = product.id;
+          byId("adjust-product-name").textContent = `${product.name} · Current stock: ${product.quantity}`;
+          const form = byId("adjust-form");
+          form.elements.price.value = product.price;
+          form.elements.unitsPerPrice.value = product.unitsPerPrice;
+          form.elements.quantity.value = product.quantity;
+          adjustDialog.showModal();
+          form.elements.price.focus();
+        }
+
+        function removeProduct(id) {
+          const product = state.products.find((item) => item.id === id);
+          if (!product || !window.confirm(`Remove ${product.name} from inventory? Past sales will be kept.`)) return;
+          const productIndex = state.products.indexOf(product);
+          state.products = state.products.filter((item) => item.id !== id);
+          addLog(`Item removed from inventory: ${product.name}; remaining stock was ${product.quantity}.`);
+          if (!saveData()) {
+            state.products.splice(productIndex, 0, product);
+            state.logs.pop();
+            return;
+          }
+          render();
+          showToast(`${product.name} removed from inventory.`);
+        }
+
+        function cancelSale(id) {
+          const saleIndex = state.sales.findIndex((item) => item.id === id);
+          if (saleIndex === -1) return;
+          const sale = state.sales[saleIndex];
+          const product = state.products.find((item) =>
+            sale.productId ? item.id === sale.productId : item.name === sale.productName
+          );
+          if (!product) {
+            showToast(`Cannot cancel this sale because ${sale.productName} is no longer in inventory.`);
+            return;
+          }
+          if (!window.confirm(`Cancel the sale of ${sale.quantity} ${sale.productName} and return the stock?`)) return;
+
+          const previousQuantity = product.quantity;
+          product.quantity += sale.quantity;
+          state.sales.splice(saleIndex, 1);
+          addLog(`Sale canceled: ${formatItemQuantity(sale.quantity)} of ${sale.productName}; stock updated from ${previousQuantity} to ${product.quantity}.`);
+          if (!saveData()) {
+            product.quantity = previousQuantity;
+            state.sales.splice(saleIndex, 0, sale);
+            state.logs.pop();
+            return;
+          }
+          render();
+          showToast(`Sale canceled and ${sale.quantity} ${sale.productName} returned to stock.`);
+        }
+
+        function updateClock() {
+          const now = new Date();
+          byId("today").textContent = dateOnlyFormat.format(now);
+          byId("clock").textContent = clockFormat.format(now);
+          byId("clock").dateTime = now.toISOString();
+        }
+
+        updateClock();
+        window.setInterval(updateClock, 1000);
+        window.setInterval(updateFarmTimers, 1000);
+        byId("inventory-search").addEventListener("input", renderInventory);
+        byId("sales-search").addEventListener("input", renderSales);
+
+        document.querySelectorAll("[data-view]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const viewId = button.dataset.view;
+            byId("stock-view").hidden = viewId !== "stock-view";
+            byId("farming-view").hidden = viewId !== "farming-view";
+            document.querySelectorAll("[data-view]").forEach((navButton) => {
+              if (navButton === button) navButton.setAttribute("aria-current", "page");
+              else navButton.removeAttribute("aria-current");
+            });
+          });
+        });
+
+        byId("add-product-button").addEventListener("click", () => {
+          byId("product-form").reset();
+          productDialog.showModal();
+          byId("product-form").elements.name.focus();
+        });
+
+        byId("add-farm-button").addEventListener("click", () => {
+          byId("farm-form").reset();
+          farmDialog.showModal();
+          byId("farm-form").elements.world.focus();
+        });
+
+        byId("farm-form").addEventListener("submit", (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const farm = {
+            id: crypto.randomUUID(),
+            world: form.elements.world.value.trim(),
+            item: form.elements.item.value.trim(),
+            durationMinutes: Number(form.elements.durationMinutes.value),
+            harvestStartedAt: null
+          };
+          if (!farm.world || !farm.item || !Number.isInteger(farm.durationMinutes) || farm.durationMinutes < 1) {
+            showToast("Enter a world, an item to harvest, and a whole-number grow time of at least 1 minute.");
+            return;
+          }
+          state.farms.push(farm);
+          addLog(`Farm added: ${farm.item} in ${farm.world}; grow time is ${farm.durationMinutes} minutes.`);
+          if (!saveData()) {
+            state.farms.pop();
+            state.logs.pop();
+            return;
+          }
+          farmDialog.close();
+          renderFarms();
+          renderActivity();
+          showToast(`${farm.item} farm in ${farm.world} added.`);
+        });
+
+        byId("product-form").addEventListener("submit", (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const product = {
+            id: crypto.randomUUID(),
+            name: form.elements.name.value.trim(),
+            unitsPerPrice: Number(form.elements.unitsPerPrice.value),
+            price: Number(form.elements.price.value),
+            quantity: Number(form.elements.quantity.value)
+          };
+          if (!product.name || !Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1 || !Number.isFinite(product.price) || product.price < 0 || !Number.isInteger(product.quantity) || product.quantity < 0) {
+            showToast("Enter an item name, a valid bundle quantity, price in WL, and whole-number stock quantity.");
+            return;
+          }
+          state.products.push(product);
+          addLog(`Item added: ${product.name}; stock set to ${product.quantity}.`);
+          if (!saveData()) {
+            state.products.pop();
+            state.logs.pop();
+            return;
+          }
+          productDialog.close();
+          render();
+          showToast(`${product.name} added to inventory.`);
+        });
+
+        byId("record-sale-button").addEventListener("click", () => {
+          if (state.products.length === 0) {
+            showToast("Add an item to inventory before recording a sale.");
+            return;
+          }
+          const select = byId("sale-product");
+          select.replaceChildren();
+          for (const product of state.products.filter((item) => item.quantity > 0)) {
+            const option = document.createElement("option");
+            option.value = product.id;
+            option.textContent = `${product.name} — ${formatBundlePrice(product)} — ${product.quantity} in stock`;
+            select.append(option);
+          }
+          if (state.products.every((product) => product.quantity === 0)) {
+            showToast("There is no stock available to sell.");
+            return;
+          }
+          byId("sale-form").reset();
+          updateSaleTotal();
+          saleDialog.showModal();
+        });
+
+        function updateSaleTotal() {
+          const form = byId("sale-form");
+          const product = state.products.find((item) => item.id === form.elements.product.value);
+          const quantity = Number(form.elements.quantity.value);
+          if (!product || !Number.isInteger(quantity) || quantity < 1) {
+            byId("sale-total-preview").textContent = "Enter the number of items to see the total.";
+            return;
+          }
+          const total = Math.round(product.price * (quantity / product.unitsPerPrice) * 100) / 100;
+          byId("sale-total-preview").textContent = `Total: ${formatWorldLocks(total)}`;
+        }
+
+        byId("sale-form").elements.product.addEventListener("change", updateSaleTotal);
+        byId("sale-form").elements.quantity.addEventListener("input", updateSaleTotal);
+
+        byId("sale-form").addEventListener("submit", (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const product = state.products.find((item) => item.id === form.elements.product.value);
+          const quantity = Number(form.elements.quantity.value);
+          if (!product || !Number.isInteger(quantity) || quantity < 1 || quantity > product.quantity) {
+            showToast("Enter a valid quantity that is available in stock.");
+            return;
+          }
+          const total = Math.round(product.price * (quantity / product.unitsPerPrice) * 100) / 100;
+          if (!Number.isFinite(total)) {
+            showToast("The sale total is too large to calculate.");
+            return;
+          }
+          const sale = {
+            id: crypto.randomUUID(),
+            productId: product.id,
+            productName: product.name,
+            quantity,
+            total,
+            date: new Date().toISOString()
+          };
+          const previousQuantity = product.quantity;
+          product.quantity -= quantity;
+          state.sales.push(sale);
+          addLog(`Sale recorded: ${formatItemQuantity(quantity)} of ${product.name} for ${formatWorldLocks(total)}; stock updated from ${previousQuantity} to ${product.quantity}.`);
+          if (!saveData()) {
+            product.quantity = previousQuantity;
+            state.sales.pop();
+            state.logs.pop();
+            return;
+          }
+          saleDialog.close();
+          render();
+          showToast(`Sale recorded: ${formatItemQuantity(quantity)} of ${product.name} for ${formatWorldLocks(total)}.`);
+        });
+
+        byId("adjust-form").addEventListener("submit", (event) => {
+          event.preventDefault();
+          const product = state.products.find((item) => item.id === adjustingProductId);
+          const form = event.currentTarget;
+          const price = Number(form.elements.price.value);
+          const unitsPerPrice = Number(form.elements.unitsPerPrice.value);
+          const quantity = Number(form.elements.quantity.value);
+          if (!product || !Number.isFinite(price) || price < 0 || !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 || !Number.isInteger(quantity) || quantity < 0) {
+            showToast("Enter a valid bundle quantity, WL price, and whole-number stock quantity.");
+            return;
+          }
+          const previousQuantity = product.quantity;
+          const previousPrice = product.price;
+          const previousUnitsPerPrice = product.unitsPerPrice;
+          if (quantity === previousQuantity && price === previousPrice && unitsPerPrice === previousUnitsPerPrice) {
+            adjustDialog.close();
+            return;
+          }
+          product.quantity = quantity;
+          product.price = price;
+          product.unitsPerPrice = unitsPerPrice;
+          if (quantity !== previousQuantity) {
+            addLog(`Stock updated for ${product.name}: from ${previousQuantity} to ${quantity}.`);
+          }
+          if (price !== previousPrice || unitsPerPrice !== previousUnitsPerPrice) {
+            addLog(`Bundle price updated for ${product.name}: from ${formatBundlePrice({ unitsPerPrice: previousUnitsPerPrice, price: previousPrice })} to ${formatBundlePrice({ unitsPerPrice, price })}.`);
+          }
+          if (!saveData()) {
+            product.quantity = previousQuantity;
+            product.price = previousPrice;
+            product.unitsPerPrice = previousUnitsPerPrice;
+            if (quantity !== previousQuantity) state.logs.pop();
+            if (price !== previousPrice || unitsPerPrice !== previousUnitsPerPrice) state.logs.pop();
+            return;
+          }
+          adjustDialog.close();
+          render();
+          showToast(`Changes saved for ${product.name}.`);
+        });
+
+        document.querySelectorAll("[data-close]").forEach((button) => {
+          button.addEventListener("click", () => button.closest("dialog").close());
+        });
+
+        render();
+      })();
+    </script>
+  </body>
+</html>
