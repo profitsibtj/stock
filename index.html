@@ -272,7 +272,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th scope="col">Item</th><th scope="col">Price per Bundle</th><th scope="col">Stock</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th scope="col">No.</th><th scope="col">Item</th><th scope="col">Price per Bundle</th><th scope="col">Stock</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
             <tbody id="inventory-rows"></tbody>
           </table>
           <div class="empty-state" id="inventory-empty" hidden>No items available. Add an item to get started.</div>
@@ -289,7 +289,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th scope="col">Item</th><th scope="col">Date</th><th scope="col">Items Sold</th><th scope="col">Total (WL)</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th scope="col">No.</th><th scope="col">Item</th><th scope="col">Date</th><th scope="col">Items Sold</th><th scope="col">Total (WL)</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
             <tbody id="sales-rows"></tbody>
           </table>
           <div class="empty-state" id="sales-empty" hidden>No sales recorded yet. Record a sale to see it here.</div>
@@ -306,7 +306,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th scope="col">Activity</th><th scope="col">Date</th></tr></thead>
+            <thead><tr><th scope="col">No.</th><th scope="col">Activity</th><th scope="col">Date</th></tr></thead>
             <tbody id="activity-rows"></tbody>
           </table>
           <div class="empty-state" id="activity-empty" hidden>No activity recorded yet.</div>
@@ -331,7 +331,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th scope="col">World</th><th scope="col">Item</th><th scope="col">Grow Time</th><th scope="col">Harvest Status</th><th scope="col">Harvest Finished</th></tr></thead>
+              <thead><tr><th scope="col">No.</th><th scope="col">World</th><th scope="col">Item</th><th scope="col">Grow Time</th><th scope="col">Harvest Status</th><th scope="col">Harvest Finished</th></tr></thead>
               <tbody id="farm-rows"></tbody>
             </table>
             <div class="empty-state" id="farm-empty" hidden>No farms yet. Add a farm world to start tracking harvests.</div>
@@ -399,7 +399,7 @@
         const PIN_SESSION_KEY = "stockroom-pin-unlocked";
         const STORAGE_KEY = "stockroom-data-v1";
         const SUPABASE_URL = "https://ouodtpkpieydbrttuzbl.supabase.co";
-        const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY_HERE";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91b2R0cGtwaWV5ZGJydHR1emJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxOTU4NzEsImV4cCI6MjEwNzc3MTg3MX0.HuXtPowTWP4qe24rdBIF3sTpuvc6bUQPfC3lf24vHWA";
         const SUPABASE_TABLE_URL = `${SUPABASE_URL}/rest/v1/stockroom_state`;
         const LOW_STOCK_THRESHOLD = 5;
         const worldLocks = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
@@ -503,7 +503,7 @@
         }
 
         function cloudHeaders() {
-          if (!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === "PASTE_YOUR_SUPABASE_ANON_KEY_HERE") {
+          if (!SUPABASE_ANON_KEY.trim()) {
             throw new Error("Add your Supabase publishable/anon key in index.html first.");
           }
           return {
@@ -596,8 +596,10 @@
           const query = byId("inventory-search").value.trim().toLowerCase();
           body.replaceChildren();
           const products = state.products.filter((product) => product.name.toLowerCase().includes(query));
+          let rowNumber = 1;
           for (const product of products) {
             const row = document.createElement("tr");
+            row.append(makeCell(String(rowNumber++)));
             const nameCell = document.createElement("td");
             const name = document.createElement("span");
             name.className = "item-name";
@@ -645,9 +647,11 @@
           const sales = recentSales.filter((sale) =>
             `${sale.productName} ${dateFormat.format(new Date(sale.date))} ${sale.quantity}`.toLowerCase().includes(query)
           );
+          let rowNumber = 1;
           for (const sale of sales) {
             const row = document.createElement("tr");
             row.append(
+              makeCell(String(rowNumber++)),
               makeCell(sale.productName),
               makeCell(dateFormat.format(new Date(sale.date))),
               makeCell(formatItemQuantity(sale.quantity)),
@@ -672,9 +676,11 @@
           const body = byId("activity-rows");
           body.replaceChildren();
           const logs = [...state.logs].sort((a, b) => new Date(b.date) - new Date(a.date));
+          let rowNumber = 1;
           for (const log of logs) {
             const row = document.createElement("tr");
             row.append(
+              makeCell(String(rowNumber++)),
               makeCell(log.message),
               makeCell(dateFormat.format(new Date(log.date)))
             );
@@ -688,6 +694,7 @@
           body.replaceChildren();
           farmTimers.clear();
           farmCheckboxes.clear();
+          let rowNumber = 1;
           for (const farm of state.farms) {
             const row = document.createElement("tr");
             const timerCell = document.createElement("td");
@@ -699,6 +706,7 @@
             checkbox.addEventListener("change", () => completeHarvest(farm.id, checkbox));
             finishedCell.append(checkbox);
             row.append(
+              makeCell(String(rowNumber++)),
               makeCell(farm.world),
               makeCell(farm.item),
               makeCell(`${farm.durationMinutes} minutes`),
