@@ -349,7 +349,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th scope="col">No.</th><th scope="col">World</th><th scope="col">Item</th><th scope="col">Grow Time</th><th scope="col">Harvest Status</th><th scope="col">Harvest Finished</th></tr></thead>
+              <thead><tr><th scope="col">No.</th><th scope="col">World</th><th scope="col">Item</th><th scope="col">Grow Time</th><th scope="col">Harvest Status</th><th scope="col">Harvest Finished</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
               <tbody id="farm-rows"></tbody>
             </table>
             <div class="empty-state" id="farm-empty" hidden>No farms yet. Add a farm world to start tracking harvests.</div>
@@ -413,6 +413,24 @@
       </form>
     </dialog>
 
+    <dialog id="farm-adjust-dialog" aria-labelledby="farm-adjust-dialog-title">
+      <form id="farm-adjust-form">
+        <div class="dialog-header"><h2 id="farm-adjust-dialog-title">Adjust Farm</h2></div>
+        <div class="dialog-body">
+          <p id="farm-adjust-name" style="margin:0;color:#77818d"></p>
+          <label class="field">World Name<input id="farm-adjust-world" name="world" required maxlength="80"></label>
+          <label class="field">Item to Harvest<input id="farm-adjust-item" name="item" required maxlength="80"></label>
+          <fieldset class="field grow-time-fields">
+            <legend>Grow Time (DD HH MM)</legend>
+            <label>Days<input id="farm-adjust-days" name="durationDays" type="number" required min="0" step="1" value="0"></label>
+            <label>Hours<input id="farm-adjust-hours" name="durationHours" type="number" required min="0" max="23" step="1" value="1"></label>
+            <label>Minutes<input id="farm-adjust-minutes" name="durationRemainderMinutes" type="number" required min="0" max="59" step="1" value="0"></label>
+          </fieldset>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Save Changes</button></div>
+      </form>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     </div>
 
@@ -437,8 +455,10 @@
         const saleDialog = byId("sale-dialog");
         const adjustDialog = byId("adjust-dialog");
         const farmDialog = byId("farm-dialog");
+        const farmAdjustDialog = byId("farm-adjust-dialog");
         let state = structuredClone(defaultData);
         let adjustingProductId = null;
+        let adjustingFarmId = null;
         let toastTimer;
         let saveQueue = Promise.resolve();
         const currentPages = { inventory: 1, sales: 1, activity: 1 };
@@ -805,6 +825,7 @@
             checkbox.setAttribute("aria-label", `Harvest finished for ${farm.item} in ${farm.world}`);
             checkbox.addEventListener("change", () => completeHarvest(farm.id, checkbox));
             finishedCell.append(checkbox);
+
             row.append(
               makeCell(String(rowNumber++)),
               makeCell(farm.world),
@@ -813,6 +834,25 @@
               timerCell,
               finishedCell
             );
+
+            const actions = document.createElement("td");
+            const actionGroup = document.createElement("div");
+            actionGroup.className = "row-actions";
+            const adjustButton = document.createElement("button");
+            adjustButton.className = "text-button";
+            adjustButton.type = "button";
+            adjustButton.textContent = "Adjust";
+            adjustButton.setAttribute("aria-label", `Adjust farm ${farm.item} in ${farm.world}`);
+            adjustButton.addEventListener("click", () => openFarmAdjustDialog(farm));
+            const deleteButton = document.createElement("button");
+            deleteButton.className = "text-button text-button-danger";
+            deleteButton.type = "button";
+            deleteButton.textContent = "Remove";
+            deleteButton.setAttribute("aria-label", `Remove farm ${farm.item} in ${farm.world}`);
+            deleteButton.addEventListener("click", () => removeFarm(farm.id));
+            actionGroup.append(adjustButton, deleteButton);
+            actions.append(actionGroup);
+            row.append(actions);
             body.append(row);
             farmTimers.set(farm.id, timerCell);
             farmCheckboxes.set(farm.id, checkbox);
@@ -900,6 +940,34 @@
           form.elements.quantity.value = product.quantity;
           adjustDialog.showModal();
           form.elements.price.focus();
+        }
+
+        function openFarmAdjustDialog(farm) {
+          adjustingFarmId = farm.id;
+          byId("farm-adjust-name").textContent = `${farm.item} in ${farm.world}`;
+          byId("farm-adjust-world").value = farm.world;
+          byId("farm-adjust-item").value = farm.item;
+          byId("farm-adjust-days").value = Math.floor(farm.durationMinutes / 1440);
+          byId("farm-adjust-hours").value = Math.floor((farm.durationMinutes % 1440) / 60);
+          byId("farm-adjust-minutes").value = farm.durationMinutes % 60;
+          farmAdjustDialog.showModal();
+          byId("farm-adjust-world").focus();
+        }
+
+        async function removeFarm(id) {
+          const farm = state.farms.find((item) => item.id === id);
+          if (!farm || !window.confirm(`Remove the farm for ${farm.item} in ${farm.world}?`)) return;
+          const farmIndex = state.farms.indexOf(farm);
+          state.farms.splice(farmIndex, 1);
+          addLog(`Farm removed: ${farm.item} in ${farm.world}.`);
+          if (!await saveData()) {
+            state.farms.splice(farmIndex, 0, farm);
+            state.logs.pop();
+            return;
+          }
+          renderFarms();
+          renderActivity();
+          showToast(`${farm.item} farm in ${farm.world} removed.`);
         }
 
         async function removeProduct(id) {
@@ -1026,6 +1094,53 @@
           renderFarms();
           renderActivity();
           showToast(`${farm.item} farm in ${farm.world} added.`);
+        });
+
+        byId("farm-adjust-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const farm = state.farms.find((item) => item.id === adjustingFarmId);
+          const world = byId("farm-adjust-world").value.trim();
+          const item = byId("farm-adjust-item").value.trim();
+          const days = Number(byId("farm-adjust-days").value);
+          const hours = Number(byId("farm-adjust-hours").value);
+          const minutes = Number(byId("farm-adjust-minutes").value);
+          const durationMinutes = days * 1440 + hours * 60 + minutes;
+          if (!farm || !world || !item ||
+            !Number.isInteger(days) || days < 0 ||
+            !Number.isInteger(hours) || hours < 0 || hours > 23 ||
+            !Number.isInteger(minutes) || minutes < 0 || minutes > 59 ||
+            !Number.isSafeInteger(durationMinutes) || durationMinutes < 1) {
+            showToast("Enter a world, an item to harvest, and a valid grow time greater than 00 00 00.");
+            return;
+          }
+
+          const previous = {
+            world: farm.world,
+            item: farm.item,
+            durationMinutes: farm.durationMinutes
+          };
+          if (world === previous.world && item === previous.item && durationMinutes === previous.durationMinutes) {
+            farmAdjustDialog.close();
+            return;
+          }
+
+          farm.world = world;
+          farm.item = item;
+          farm.durationMinutes = durationMinutes;
+          addLog(`Farm updated: ${previous.item} in ${previous.world} changed to ${farm.item} in ${farm.world}; grow time is ${formatGrowTime(farm.durationMinutes)} (DD HH MM).`);
+          if (!await saveData()) {
+            farm.world = previous.world;
+            farm.item = previous.item;
+            farm.durationMinutes = previous.durationMinutes;
+            state.logs.pop();
+            return;
+          }
+
+          farmAdjustDialog.close();
+          adjustingFarmId = null;
+          renderFarms();
+          renderActivity();
+          showToast(`${farm.item} farm in ${farm.world} updated.`);
         });
 
         byId("product-form").addEventListener("submit", async (event) => {
