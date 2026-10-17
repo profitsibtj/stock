@@ -182,6 +182,9 @@
       .dialog-header h2 { font-size: 18px; }
       .dialog-body { display: grid; gap: 14px; padding: 19px 22px; }
       .field { display: grid; gap: 6px; color: #4c5863; font-size: 12px; font-weight: 600; }
+      .grow-time-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; }
+      .grow-time-fields legend { margin-bottom: 6px; }
+      .grow-time-fields label { display: grid; gap: 6px; }
       .field input, .field select {
         width: 100%;
         height: 40px;
@@ -397,9 +400,14 @@
       <form id="farm-form">
         <div class="dialog-header"><h2 id="farm-dialog-title">Add Farm</h2></div>
         <div class="dialog-body">
-          <label class="field">World Name<input name="world" required maxlength="80" placeholder="Example: Chandelier Farm"></label>
-          <label class="field">Item to Harvest<input name="item" required maxlength="80" placeholder="Example: Chandelier"></label>
-          <label class="field">Grow Time (minutes)<input name="durationMinutes" type="number" required min="1" step="1" value="60"></label>
+          <label class="field">World Name<input id="farm-world" name="world" required maxlength="80" placeholder="Example: Chandelier Farm"></label>
+          <label class="field">Item to Harvest<input id="farm-item" name="item" required maxlength="80" placeholder="Example: Chandelier"></label>
+          <fieldset class="field grow-time-fields">
+            <legend>Grow Time (DD HH MM)</legend>
+            <label>Days<input id="farm-days" name="durationDays" type="number" required min="0" step="1" value="0"></label>
+            <label>Hours<input id="farm-hours" name="durationHours" type="number" required min="0" max="23" step="1" value="1"></label>
+            <label>Minutes<input id="farm-minutes" name="durationRemainderMinutes" type="number" required min="0" max="59" step="1" value="0"></label>
+          </fieldset>
         </div>
         <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Add Farm</button></div>
       </form>
@@ -609,6 +617,13 @@
           return `${quantity} ${quantity === 1 ? "item" : "items"}`;
         }
 
+        function formatGrowTime(durationMinutes) {
+          const days = Math.floor(durationMinutes / 1440);
+          const hours = Math.floor((durationMinutes % 1440) / 60);
+          const minutes = durationMinutes % 60;
+          return `${String(days).padStart(2, "0")} ${String(hours).padStart(2, "0")} ${String(minutes).padStart(2, "0")}`;
+        }
+
         function inventoryStatus(product) {
           const fullBundles = Math.floor(product.quantity / product.unitsPerPrice);
           if (fullBundles === 0) return { label: "Out of stock", key: "out-of-stock", badgeClass: "badge-out" };
@@ -794,7 +809,7 @@
               makeCell(String(rowNumber++)),
               makeCell(farm.world),
               makeCell(farm.item),
-              makeCell(`${farm.durationMinutes} minutes`),
+              makeCell(formatGrowTime(farm.durationMinutes)),
               timerCell,
               finishedCell
             );
@@ -847,7 +862,7 @@
           }
           const previousHarvestStartedAt = farm.harvestStartedAt;
           farm.harvestStartedAt = new Date().toISOString();
-          addLog(`Harvest completed for ${farm.item} in ${farm.world}. Grow timer started for ${farm.durationMinutes} minutes.`);
+          addLog(`Harvest completed for ${farm.item} in ${farm.world}. Grow timer started for ${formatGrowTime(farm.durationMinutes)} (DD HH MM).`);
           if (!await saveData()) {
             farm.harvestStartedAt = previousHarvestStartedAt;
             state.logs.pop();
@@ -978,20 +993,30 @@
 
         byId("farm-form").addEventListener("submit", async (event) => {
           event.preventDefault();
-          const form = event.currentTarget;
+          const form = byId("farm-form");
+          const world = byId("farm-world").value.trim();
+          const item = byId("farm-item").value.trim();
+          const days = Number(byId("farm-days").value);
+          const hours = Number(byId("farm-hours").value);
+          const minutes = Number(byId("farm-minutes").value);
+          const durationMinutes = days * 1440 + hours * 60 + minutes;
           const farm = {
             id: crypto.randomUUID(),
-            world: form.elements.world.value.trim(),
-            item: form.elements.item.value.trim(),
-            durationMinutes: Number(form.elements.durationMinutes.value),
+            world,
+            item,
+            durationMinutes,
             harvestStartedAt: null
           };
-          if (!farm.world || !farm.item || !Number.isInteger(farm.durationMinutes) || farm.durationMinutes < 1) {
-            showToast("Enter a world, an item to harvest, and a whole-number grow time of at least 1 minute.");
+          if (!farm.world || !farm.item ||
+            !Number.isInteger(days) || days < 0 ||
+            !Number.isInteger(hours) || hours < 0 || hours > 23 ||
+            !Number.isInteger(minutes) || minutes < 0 || minutes > 59 ||
+            !Number.isSafeInteger(farm.durationMinutes) || farm.durationMinutes < 1) {
+            showToast("Enter a world, an item to harvest, and a valid grow time greater than 00 00 00.");
             return;
           }
           state.farms.push(farm);
-          addLog(`Farm added: ${farm.item} in ${farm.world}; grow time is ${farm.durationMinutes} minutes.`);
+          addLog(`Farm added: ${farm.item} in ${farm.world}; grow time is ${formatGrowTime(farm.durationMinutes)} (DD HH MM).`);
           if (!await saveData()) {
             state.farms.pop();
             state.logs.pop();
