@@ -122,6 +122,11 @@
         border-radius: 7px;
         outline: none;
       }
+      .toolbar select { height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); }
+      .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 22px; border-top: 1px solid var(--line); }
+      .pagination[hidden] { display: none; }
+      .pagination-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+      .pagination .button { min-height: 34px; padding: 0 11px; font-size: 12px; }
       input:focus, select:focus { border-color: #78a992; box-shadow: 0 0 0 3px rgb(34 122 87 / 10%); outline: none; }
       .table-wrap { overflow-x: auto; }
       table { width: 100%; border-collapse: collapse; text-align: left; }
@@ -204,6 +209,7 @@
         .toolbar { width: 100%; }
         .search { flex: 1; min-width: 0; }
         th, td { padding-right: 14px; padding-left: 14px; }
+        .pagination { padding-right: 14px; padding-left: 14px; }
       }
       @media (max-width: 410px) {
         .summary { grid-template-columns: 1fr; }
@@ -268,6 +274,12 @@
           <h2 id="inventory-heading">Inventory</h2>
           <div class="toolbar">
             <input class="search" id="inventory-search" type="search" placeholder="Search items..." aria-label="Search inventory">
+            <select id="inventory-status-filter" aria-label="Filter inventory by status">
+              <option value="all">All statuses</option>
+              <option value="in-stock">In stock</option>
+              <option value="low-stock">Low stock</option>
+              <option value="out-of-stock">Out of stock</option>
+            </select>
           </div>
         </div>
         <div class="table-wrap">
@@ -276,8 +288,9 @@
             <tbody id="inventory-rows"></tbody>
           </table>
           <div class="empty-state" id="inventory-empty" hidden>No items available. Add an item to get started.</div>
-          <div class="empty-state" id="search-empty" hidden>Item not found.</div>
+          <div class="empty-state" id="search-empty" hidden>No items match your search or status filter.</div>
         </div>
+        <nav class="pagination" id="inventory-pagination" aria-label="Inventory pages" hidden></nav>
       </section>
 
       <section class="panel" aria-labelledby="sales-heading">
@@ -295,6 +308,7 @@
           <div class="empty-state" id="sales-empty" hidden>No sales recorded yet. Record a sale to see it here.</div>
           <div class="empty-state" id="sales-search-empty" hidden>Sale not found.</div>
         </div>
+        <nav class="pagination" id="sales-pagination" aria-label="Sales pages" hidden></nav>
       </section>
 
       <section class="panel" aria-labelledby="activity-heading">
@@ -311,6 +325,7 @@
           </table>
           <div class="empty-state" id="activity-empty" hidden>No activity recorded yet.</div>
         </div>
+        <nav class="pagination" id="activity-pagination" aria-label="Activity log pages" hidden></nav>
       </section>
       </div>
 
@@ -401,7 +416,8 @@
         const SUPABASE_URL = "https://ouodtpkpieydbrttuzbl.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91b2R0cGtwaWV5ZGJydHR1emJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxOTU4NzEsImV4cCI6MjEwNzc3MTg3MX0.HuXtPowTWP4qe24rdBIF3sTpuvc6bUQPfC3lf24vHWA";
         const SUPABASE_TABLE_URL = `${SUPABASE_URL}/rest/v1/stockroom_state`;
-        const LOW_STOCK_THRESHOLD = 5;
+        const LOW_STOCK_BUNDLE_THRESHOLD = 3;
+        const PAGE_SIZE = 10;
         const worldLocks = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
         const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" });
         const dateOnlyFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
@@ -417,6 +433,7 @@
         let adjustingProductId = null;
         let toastTimer;
         let saveQueue = Promise.resolve();
+        const currentPages = { inventory: 1, sales: 1, activity: 1 };
         const farmTimers = new Map();
         const farmCheckboxes = new Map();
 
@@ -581,6 +598,7 @@
 
         function addLog(message) {
           state.logs.push({ message, date: new Date().toISOString() });
+          currentPages.activity = 1;
         }
 
         function formatBundlePrice(product) {
@@ -591,15 +609,61 @@
           return `${quantity} ${quantity === 1 ? "item" : "items"}`;
         }
 
+        function inventoryStatus(product) {
+          const fullBundles = Math.floor(product.quantity / product.unitsPerPrice);
+          if (fullBundles === 0) return { label: "Out of stock", key: "out-of-stock", badgeClass: "badge-out" };
+          if (fullBundles < LOW_STOCK_BUNDLE_THRESHOLD) {
+            return { label: "Low stock", key: "low-stock", badgeClass: "badge-low" };
+          }
+          return { label: "In stock", key: "in-stock", badgeClass: "" };
+        }
+
+        function renderPagination(containerId, itemCount, page, onPageChange) {
+          const container = byId(containerId);
+          const pageCount = Math.max(1, Math.ceil(itemCount / PAGE_SIZE));
+          container.replaceChildren();
+          container.hidden = pageCount <= 1;
+          if (container.hidden) return;
+
+          const previous = document.createElement("button");
+          previous.className = "button";
+          previous.type = "button";
+          previous.textContent = "Previous";
+          previous.disabled = page === 1;
+          previous.addEventListener("click", () => onPageChange(page - 1));
+
+          const label = document.createElement("span");
+          label.className = "pagination-label";
+          label.textContent = `Page ${page} of ${pageCount}`;
+          label.setAttribute("aria-live", "polite");
+
+          const next = document.createElement("button");
+          next.className = "button";
+          next.type = "button";
+          next.textContent = "Next";
+          next.disabled = page === pageCount;
+          next.addEventListener("click", () => onPageChange(page + 1));
+
+          container.append(previous, label, next);
+        }
+
         function renderInventory() {
           const body = byId("inventory-rows");
           const query = byId("inventory-search").value.trim().toLowerCase();
+          const statusFilter = byId("inventory-status-filter").value;
           body.replaceChildren();
-          const products = state.products.filter((product) => product.name.toLowerCase().includes(query));
-          let rowNumber = 1;
-          for (const product of products) {
+          const products = state.products.filter((product) =>
+            product.name.toLowerCase().includes(query) &&
+            (statusFilter === "all" || inventoryStatus(product).key === statusFilter)
+          );
+          const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
+          currentPages.inventory = Math.min(currentPages.inventory, pageCount);
+          const page = currentPages.inventory;
+          const pageStart = (page - 1) * PAGE_SIZE;
+          const pageProducts = products.slice(pageStart, pageStart + PAGE_SIZE);
+          for (const [index, product] of pageProducts.entries()) {
             const row = document.createElement("tr");
-            row.append(makeCell(String(rowNumber++)));
+            row.append(makeCell(String(pageStart + index + 1)));
             const nameCell = document.createElement("td");
             const name = document.createElement("span");
             name.className = "item-name";
@@ -609,9 +673,9 @@
             row.append(makeCell(String(product.quantity), "quantity"));
             const statusCell = document.createElement("td");
             const badge = document.createElement("span");
-            const status = product.quantity === 0 ? "Out of stock" : product.quantity <= LOW_STOCK_THRESHOLD ? "Low stock" : "In stock";
-            badge.className = `badge${product.quantity === 0 ? " badge-out" : product.quantity <= LOW_STOCK_THRESHOLD ? " badge-low" : ""}`;
-            badge.textContent = status;
+            const status = inventoryStatus(product);
+            badge.className = `badge${status.badgeClass ? ` ${status.badgeClass}` : ""}`;
+            badge.textContent = status.label;
             statusCell.append(badge);
             row.append(statusCell);
 
@@ -637,21 +701,30 @@
           }
           byId("inventory-empty").hidden = state.products.length > 0;
           byId("search-empty").hidden = state.products.length === 0 || products.length > 0;
+          renderPagination("inventory-pagination", products.length, page, (nextPage) => {
+            currentPages.inventory = nextPage;
+            renderInventory();
+          });
         }
 
         function renderSales() {
           const body = byId("sales-rows");
           body.replaceChildren();
           const query = byId("sales-search").value.trim().toLowerCase();
-          const recentSales = [...state.sales].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
-          const sales = recentSales.filter((sale) =>
-            `${sale.productName} ${dateFormat.format(new Date(sale.date))} ${sale.quantity}`.toLowerCase().includes(query)
-          );
-          let rowNumber = 1;
-          for (const sale of sales) {
+          const sales = [...state.sales]
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .filter((sale) =>
+              `${sale.productName} ${dateFormat.format(new Date(sale.date))} ${sale.quantity}`.toLowerCase().includes(query)
+            );
+          const pageCount = Math.max(1, Math.ceil(sales.length / PAGE_SIZE));
+          currentPages.sales = Math.min(currentPages.sales, pageCount);
+          const page = currentPages.sales;
+          const pageStart = (page - 1) * PAGE_SIZE;
+          const pageSales = sales.slice(pageStart, pageStart + PAGE_SIZE);
+          for (const [index, sale] of pageSales.entries()) {
             const row = document.createElement("tr");
             row.append(
-              makeCell(String(rowNumber++)),
+              makeCell(String(pageStart + index + 1)),
               makeCell(sale.productName),
               makeCell(dateFormat.format(new Date(sale.date))),
               makeCell(formatItemQuantity(sale.quantity)),
@@ -670,23 +743,35 @@
           }
           byId("sales-empty").hidden = state.sales.length > 0;
           byId("sales-search-empty").hidden = state.sales.length === 0 || sales.length > 0;
+          renderPagination("sales-pagination", sales.length, page, (nextPage) => {
+            currentPages.sales = nextPage;
+            renderSales();
+          });
         }
 
         function renderActivity() {
           const body = byId("activity-rows");
           body.replaceChildren();
           const logs = [...state.logs].sort((a, b) => new Date(b.date) - new Date(a.date));
-          let rowNumber = 1;
-          for (const log of logs) {
+          const pageCount = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
+          currentPages.activity = Math.min(currentPages.activity, pageCount);
+          const page = currentPages.activity;
+          const pageStart = (page - 1) * PAGE_SIZE;
+          const pageLogs = logs.slice(pageStart, pageStart + PAGE_SIZE);
+          for (const [index, log] of pageLogs.entries()) {
             const row = document.createElement("tr");
             row.append(
-              makeCell(String(rowNumber++)),
+              makeCell(String(pageStart + index + 1)),
               makeCell(log.message),
               makeCell(dateFormat.format(new Date(log.date)))
             );
             body.append(row);
           }
           byId("activity-empty").hidden = state.logs.length > 0;
+          renderPagination("activity-pagination", logs.length, page, (nextPage) => {
+            currentPages.activity = nextPage;
+            renderActivity();
+          });
         }
 
         function renderFarms() {
@@ -782,6 +867,9 @@
         }
 
         function render() {
+          currentPages.inventory = 1;
+          currentPages.sales = 1;
+          currentPages.activity = 1;
           renderSummary();
           renderInventory();
           renderSales();
@@ -851,8 +939,18 @@
         updateClock();
         window.setInterval(updateClock, 1000);
         window.setInterval(updateFarmTimers, 1000);
-        byId("inventory-search").addEventListener("input", renderInventory);
-        byId("sales-search").addEventListener("input", renderSales);
+        byId("inventory-search").addEventListener("input", () => {
+          currentPages.inventory = 1;
+          renderInventory();
+        });
+        byId("inventory-status-filter").addEventListener("change", () => {
+          currentPages.inventory = 1;
+          renderInventory();
+        });
+        byId("sales-search").addEventListener("input", () => {
+          currentPages.sales = 1;
+          renderSales();
+        });
 
         document.querySelectorAll("[data-view]").forEach((button) => {
           button.addEventListener("click", () => {
