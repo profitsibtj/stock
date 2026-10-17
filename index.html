@@ -398,6 +398,9 @@
         const PIN_SHA256 = "__STOCKROOM_PIN_SHA256__";
         const PIN_SESSION_KEY = "stockroom-pin-unlocked";
         const STORAGE_KEY = "stockroom-data-v1";
+        const SUPABASE_URL = "https://ouodtpkpieydbrttuzbl.supabase.co";
+        const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_ANON_KEY_HERE";
+        const SUPABASE_TABLE_URL = `${SUPABASE_URL}/rest/v1/stockroom_state`;
         const LOW_STOCK_THRESHOLD = 5;
         const worldLocks = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
         const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" });
@@ -410,19 +413,16 @@
         const saleDialog = byId("sale-dialog");
         const adjustDialog = byId("adjust-dialog");
         const farmDialog = byId("farm-dialog");
-        let state = loadData();
+        let state = structuredClone(defaultData);
         let adjustingProductId = null;
         let toastTimer;
+        let saveQueue = Promise.resolve();
         const farmTimers = new Map();
         const farmCheckboxes = new Map();
 
         const pinGate = byId("pin-gate");
         const appShell = byId("app-shell");
         const pinForm = byId("pin-form");
-        if (sessionStorage.getItem(PIN_SESSION_KEY) === "1") {
-          pinGate.hidden = true;
-          appShell.hidden = false;
-        }
 
         pinForm.addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -436,57 +436,131 @@
               pinForm.elements.pin.select();
               return;
             }
+            byId("pin-error").textContent = "Connecting to the shared database...";
+            byId("pin-error").hidden = false;
+            state = await loadCloudData();
+            render();
             sessionStorage.setItem(PIN_SESSION_KEY, "1");
             pinGate.hidden = true;
             appShell.hidden = false;
           } catch (error) {
-            byId("pin-error").textContent = `PIN verification failed: ${error.message}`;
+            byId("pin-error").textContent = `Could not connect to the shared database: ${error.message}`;
             byId("pin-error").hidden = false;
           }
         });
+
+        if (sessionStorage.getItem(PIN_SESSION_KEY) === "1") {
+          byId("pin-error").textContent = "Connecting to the shared database...";
+          byId("pin-error").hidden = false;
+          loadCloudData().then((data) => {
+            state = data;
+            render();
+            pinGate.hidden = true;
+            appShell.hidden = false;
+          }).catch((error) => {
+            sessionStorage.removeItem(PIN_SESSION_KEY);
+            byId("pin-error").textContent = `Could not connect to the shared database: ${error.message}`;
+            byId("pin-error").hidden = false;
+          });
+        }
 
         function loadData() {
           try {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (!saved) return structuredClone(defaultData);
-            const parsed = JSON.parse(saved);
-            if (!parsed || !Array.isArray(parsed.products) || !Array.isArray(parsed.sales)) {
-              throw new Error("Saved inventory data has an invalid format.");
-            }
-            if (parsed.logs === undefined) parsed.logs = [];
-            if (!Array.isArray(parsed.logs)) throw new Error("Saved activity log has an invalid format.");
-            if (parsed.farms === undefined) parsed.farms = [];
-            if (!Array.isArray(parsed.farms)) throw new Error("Saved farm tracker data has an invalid format.");
-            for (const product of parsed.products) {
-              if (product.unitsPerPrice === undefined) product.unitsPerPrice = 1;
-              if (!Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1) {
-                throw new Error(`Saved bundle quantity for ${product.name} is invalid.`);
-              }
-            }
-            for (const farm of parsed.farms) {
-              if (!farm || typeof farm.id !== "string" || typeof farm.world !== "string" ||
-                typeof farm.item !== "string" || !Number.isInteger(farm.durationMinutes) ||
-                farm.durationMinutes < 1 ||
-                (farm.harvestStartedAt !== null && farm.harvestStartedAt !== undefined &&
-                  !Number.isFinite(Date.parse(farm.harvestStartedAt)))) {
-                throw new Error("Saved farm tracker contains invalid farm data.");
-              }
-              if (farm.harvestStartedAt === undefined) farm.harvestStartedAt = null;
-            }
-            return parsed;
+            return validateData(JSON.parse(saved));
           } catch (error) {
             window.setTimeout(() => showToast(`Could not load saved data: ${error.message}`), 0);
             return structuredClone(defaultData);
           }
         }
 
-        function saveData() {
+        function validateData(data) {
+          if (!data || !Array.isArray(data.products) || !Array.isArray(data.sales)) {
+            throw new Error("The shared database record has an invalid format.");
+          }
+          if (data.logs === undefined) data.logs = [];
+          if (!Array.isArray(data.logs)) throw new Error("The shared activity log has an invalid format.");
+          if (data.farms === undefined) data.farms = [];
+          if (!Array.isArray(data.farms)) throw new Error("The shared farm tracker data has an invalid format.");
+          for (const product of data.products) {
+            if (product.unitsPerPrice === undefined) product.unitsPerPrice = 1;
+            if (!Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1) {
+              throw new Error(`Saved bundle quantity for ${product.name} is invalid.`);
+            }
+          }
+          for (const farm of data.farms) {
+            if (!farm || typeof farm.id !== "string" || typeof farm.world !== "string" ||
+              typeof farm.item !== "string" || !Number.isInteger(farm.durationMinutes) ||
+              farm.durationMinutes < 1 ||
+              (farm.harvestStartedAt !== null && farm.harvestStartedAt !== undefined &&
+                !Number.isFinite(Date.parse(farm.harvestStartedAt)))) {
+              throw new Error("The shared farm tracker contains invalid farm data.");
+            }
+            if (farm.harvestStartedAt === undefined) farm.harvestStartedAt = null;
+          }
+          return data;
+        }
+
+        function cloudHeaders() {
+          if (!SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === "PASTE_YOUR_SUPABASE_ANON_KEY_HERE") {
+            throw new Error("Add your Supabase publishable/anon key in index.html first.");
+          }
+          return {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+          };
+        }
+
+        async function loadCloudData() {
+          const response = await fetch(`${SUPABASE_TABLE_URL}?id=eq.main&select=data`, {
+            headers: cloudHeaders()
+          });
+          if (!response.ok) throw new Error(`Supabase returned ${response.status}: ${await response.text()}`);
+          const rows = await response.json();
+          if (!Array.isArray(rows)) throw new Error("Supabase returned an unexpected response.");
+          if (rows.length > 0) return validateData(rows[0].data);
+
+          const saved = loadData();
+          await writeCloudData(saved);
+          return saved;
+        }
+
+        async function writeCloudData(data) {
+          const headers = {
+            ...cloudHeaders(),
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates,return=minimal"
+          };
+          const response = await fetch(`${SUPABASE_TABLE_URL}?on_conflict=id`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ id: "main", data })
+          });
+          if (!response.ok) throw new Error(`Supabase returned ${response.status}: ${await response.text()}`);
+        }
+
+        async function saveData() {
+          const snapshot = structuredClone(state);
+          const previousInert = appShell.inert;
+          appShell.inert = true;
+          const write = saveQueue.catch(() => {}).then(async () => {
+            await writeCloudData(snapshot);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+            } catch (error) {
+              showToast(`Saved to Supabase, but the local backup failed: ${error.message}`);
+            }
+          });
+          saveQueue = write;
           try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            await write;
             return true;
           } catch (error) {
-            showToast(`Could not save changes in this browser: ${error.message}`);
+            showToast(`Could not save changes to Supabase: ${error.message}`);
             return false;
+          } finally {
+            appShell.inert = previousInert;
           }
         }
 
@@ -670,7 +744,7 @@
           }
         }
 
-        function completeHarvest(id, checkbox) {
+        async function completeHarvest(id, checkbox) {
           const farm = state.farms.find((item) => item.id === id);
           if (!farm || !checkbox.checked) return;
           if (farm.harvestStartedAt && Date.now() - Date.parse(farm.harvestStartedAt) < farm.durationMinutes * 60_000) {
@@ -681,7 +755,7 @@
           const previousHarvestStartedAt = farm.harvestStartedAt;
           farm.harvestStartedAt = new Date().toISOString();
           addLog(`Harvest completed for ${farm.item} in ${farm.world}. Grow timer started for ${farm.durationMinutes} minutes.`);
-          if (!saveData()) {
+          if (!await saveData()) {
             farm.harvestStartedAt = previousHarvestStartedAt;
             state.logs.pop();
             checkbox.checked = false;
@@ -717,13 +791,13 @@
           form.elements.price.focus();
         }
 
-        function removeProduct(id) {
+        async function removeProduct(id) {
           const product = state.products.find((item) => item.id === id);
           if (!product || !window.confirm(`Remove ${product.name} from inventory? Past sales will be kept.`)) return;
           const productIndex = state.products.indexOf(product);
           state.products = state.products.filter((item) => item.id !== id);
           addLog(`Item removed from inventory: ${product.name}; remaining stock was ${product.quantity}.`);
-          if (!saveData()) {
+          if (!await saveData()) {
             state.products.splice(productIndex, 0, product);
             state.logs.pop();
             return;
@@ -732,7 +806,7 @@
           showToast(`${product.name} removed from inventory.`);
         }
 
-        function cancelSale(id) {
+        async function cancelSale(id) {
           const saleIndex = state.sales.findIndex((item) => item.id === id);
           if (saleIndex === -1) return;
           const sale = state.sales[saleIndex];
@@ -749,7 +823,7 @@
           product.quantity += sale.quantity;
           state.sales.splice(saleIndex, 1);
           addLog(`Sale canceled: ${formatItemQuantity(sale.quantity)} of ${sale.productName}; stock updated from ${previousQuantity} to ${product.quantity}.`);
-          if (!saveData()) {
+          if (!await saveData()) {
             product.quantity = previousQuantity;
             state.sales.splice(saleIndex, 0, sale);
             state.logs.pop();
@@ -796,7 +870,7 @@
           byId("farm-form").elements.world.focus();
         });
 
-        byId("farm-form").addEventListener("submit", (event) => {
+        byId("farm-form").addEventListener("submit", async (event) => {
           event.preventDefault();
           const form = event.currentTarget;
           const farm = {
@@ -812,7 +886,7 @@
           }
           state.farms.push(farm);
           addLog(`Farm added: ${farm.item} in ${farm.world}; grow time is ${farm.durationMinutes} minutes.`);
-          if (!saveData()) {
+          if (!await saveData()) {
             state.farms.pop();
             state.logs.pop();
             return;
@@ -823,7 +897,7 @@
           showToast(`${farm.item} farm in ${farm.world} added.`);
         });
 
-        byId("product-form").addEventListener("submit", (event) => {
+        byId("product-form").addEventListener("submit", async (event) => {
           event.preventDefault();
           const form = event.currentTarget;
           const product = {
@@ -839,7 +913,7 @@
           }
           state.products.push(product);
           addLog(`Item added: ${product.name}; stock set to ${product.quantity}.`);
-          if (!saveData()) {
+          if (!await saveData()) {
             state.products.pop();
             state.logs.pop();
             return;
@@ -886,7 +960,7 @@
         byId("sale-form").elements.product.addEventListener("change", updateSaleTotal);
         byId("sale-form").elements.quantity.addEventListener("input", updateSaleTotal);
 
-        byId("sale-form").addEventListener("submit", (event) => {
+        byId("sale-form").addEventListener("submit", async (event) => {
           event.preventDefault();
           const form = event.currentTarget;
           const product = state.products.find((item) => item.id === form.elements.product.value);
@@ -912,7 +986,7 @@
           product.quantity -= quantity;
           state.sales.push(sale);
           addLog(`Sale recorded: ${formatItemQuantity(quantity)} of ${product.name} for ${formatWorldLocks(total)}; stock updated from ${previousQuantity} to ${product.quantity}.`);
-          if (!saveData()) {
+          if (!await saveData()) {
             product.quantity = previousQuantity;
             state.sales.pop();
             state.logs.pop();
@@ -923,7 +997,7 @@
           showToast(`Sale recorded: ${formatItemQuantity(quantity)} of ${product.name} for ${formatWorldLocks(total)}.`);
         });
 
-        byId("adjust-form").addEventListener("submit", (event) => {
+        byId("adjust-form").addEventListener("submit", async (event) => {
           event.preventDefault();
           const product = state.products.find((item) => item.id === adjustingProductId);
           const form = event.currentTarget;
@@ -950,7 +1024,7 @@
           if (price !== previousPrice || unitsPerPrice !== previousUnitsPerPrice) {
             addLog(`Bundle price updated for ${product.name}: from ${formatBundlePrice({ unitsPerPrice: previousUnitsPerPrice, price: previousPrice })} to ${formatBundlePrice({ unitsPerPrice, price })}.`);
           }
-          if (!saveData()) {
+          if (!await saveData()) {
             product.quantity = previousQuantity;
             product.price = previousPrice;
             product.unitsPerPrice = previousUnitsPerPrice;
