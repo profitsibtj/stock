@@ -320,6 +320,7 @@
             <h2 id="activity-heading">Activity Log</h2>
             <p class="panel-description">A record of inventory and sales changes.</p>
           </div>
+          <button class="button" id="clear-activity-button" type="button">Clear Activity Log</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -363,9 +364,9 @@
         <div class="dialog-header"><h2 id="product-dialog-title">Add Product</h2></div>
         <div class="dialog-body">
           <label class="field">Item Name<input name="name" required maxlength="80" placeholder="Example: World Lock"></label>
-          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
-          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" placeholder="1"></label>
-          <label class="field">Initial Stock Quantity<input name="quantity" type="number" required min="0" step="1" value="0"></label>
+          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" placeholder="1"></label>
+          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="1" value="1"></label>
+          <label class="field">Initial Stock Quantity<input name="quantity" type="number" required min="0" step="1" placeholder="0"></label>
         </div>
         <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Add Product</button></div>
       </form>
@@ -388,9 +389,10 @@
         <div class="dialog-header"><h2 id="adjust-dialog-title">Adjust Stock</h2></div>
         <div class="dialog-body">
           <p id="adjust-product-name" style="margin:0;color:#77818d"></p>
-          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1"></label>
-          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01"></label>
-          <label class="field">New Stock Quantity<input name="quantity" type="number" required min="0" step="1"></label>
+          <label class="field">Item Name<input name="name" required maxlength="80" placeholder="Example: World Lock"></label>
+          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" placeholder="1"></label>
+          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="1" value="1"></label>
+          <label class="field">New Stock Quantity<input name="quantity" type="number" required min="0" step="1" placeholder="0"></label>
         </div>
         <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Save Changes</button></div>
       </form>
@@ -624,6 +626,29 @@
           return cell;
         }
 
+        function makeActionButton(text, label, onClick, danger = false) {
+          const button = document.createElement("button");
+          button.className = `text-button${danger ? " text-button-danger" : ""}`;
+          button.type = "button";
+          button.textContent = text;
+          button.setAttribute("aria-label", label);
+          button.addEventListener("click", onClick);
+          return button;
+        }
+
+        function makeActionsCell(...buttons) {
+          const cell = document.createElement("td");
+          if (buttons.length === 1) {
+            cell.append(buttons[0]);
+          } else {
+            const group = document.createElement("div");
+            group.className = "row-actions";
+            group.append(...buttons);
+            cell.append(group);
+          }
+          return cell;
+        }
+
         function addLog(message) {
           state.logs.push({ message, date: new Date().toISOString() });
           currentPages.activity = 1;
@@ -653,6 +678,14 @@
           return { label: "In stock", key: "in-stock", badgeClass: "" };
         }
 
+        function getPage(items, pageKey) {
+          const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+          currentPages[pageKey] = Math.min(currentPages[pageKey], pageCount);
+          const page = currentPages[pageKey];
+          const start = (page - 1) * PAGE_SIZE;
+          return { page, start, items: items.slice(start, start + PAGE_SIZE) };
+        }
+
         function renderPagination(containerId, itemCount, page, onPageChange) {
           const container = byId(containerId);
           const pageCount = Math.max(1, Math.ceil(itemCount / PAGE_SIZE));
@@ -660,26 +693,35 @@
           container.hidden = pageCount <= 1;
           if (container.hidden) return;
 
-          const previous = document.createElement("button");
-          previous.className = "button";
-          previous.type = "button";
-          previous.textContent = "Previous";
-          previous.disabled = page === 1;
-          previous.addEventListener("click", () => onPageChange(page - 1));
+          const addButton = (text, targetPage, label, current = false) => {
+            const button = document.createElement("button");
+            button.className = `button${current ? " button-primary" : ""}`;
+            button.type = "button";
+            button.textContent = text;
+            button.setAttribute("aria-label", label);
+            if (current) button.setAttribute("aria-current", "page");
+            button.disabled = targetPage === page;
+            button.addEventListener("click", () => onPageChange(targetPage));
+            container.append(button);
+          };
+          const addEllipsis = () => {
+            const ellipsis = document.createElement("span");
+            ellipsis.className = "pagination-label";
+            ellipsis.textContent = "…";
+            ellipsis.setAttribute("aria-hidden", "true");
+            container.append(ellipsis);
+          };
 
-          const label = document.createElement("span");
-          label.className = "pagination-label";
-          label.textContent = `Page ${page} of ${pageCount}`;
-          label.setAttribute("aria-live", "polite");
-
-          const next = document.createElement("button");
-          next.className = "button";
-          next.type = "button";
-          next.textContent = "Next";
-          next.disabled = page === pageCount;
-          next.addEventListener("click", () => onPageChange(page + 1));
-
-          container.append(previous, label, next);
+          addButton("«", Math.max(1, page - 1), "Previous page");
+          let firstPage = Math.max(1, page - 2);
+          let lastPage = Math.min(pageCount, firstPage + 4);
+          firstPage = Math.max(1, lastPage - 4);
+          if (firstPage > 1) addEllipsis();
+          for (let pageNumber = firstPage; pageNumber <= lastPage; pageNumber += 1) {
+            addButton(String(pageNumber), pageNumber, `Page ${pageNumber}`, pageNumber === page);
+          }
+          if (lastPage < pageCount) addEllipsis();
+          addButton("»", Math.min(pageCount, page + 1), "Next page");
         }
 
         function renderInventory() {
@@ -691,21 +733,15 @@
             product.name.toLowerCase().includes(query) &&
             (statusFilter === "all" || inventoryStatus(product).key === statusFilter)
           );
-          const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
-          currentPages.inventory = Math.min(currentPages.inventory, pageCount);
-          const page = currentPages.inventory;
-          const pageStart = (page - 1) * PAGE_SIZE;
-          const pageProducts = products.slice(pageStart, pageStart + PAGE_SIZE);
+          const { page, start, items: pageProducts } = getPage(products, "inventory");
           for (const [index, product] of pageProducts.entries()) {
             const row = document.createElement("tr");
-            row.append(makeCell(String(pageStart + index + 1)));
-            const nameCell = document.createElement("td");
-            const name = document.createElement("span");
-            name.className = "item-name";
-            name.textContent = product.name;
-            nameCell.append(name);
-            row.append(nameCell, makeCell(formatBundlePrice(product)));
-            row.append(makeCell(String(product.quantity), "quantity"));
+            row.append(
+              makeCell(String(start + index + 1)),
+              makeCell(product.name, "item-name"),
+              makeCell(formatBundlePrice(product)),
+              makeCell(String(product.quantity), "quantity")
+            );
             const statusCell = document.createElement("td");
             const badge = document.createElement("span");
             const status = inventoryStatus(product);
@@ -713,25 +749,10 @@
             badge.textContent = status.label;
             statusCell.append(badge);
             row.append(statusCell);
-
-            const actions = document.createElement("td");
-            const actionGroup = document.createElement("div");
-            actionGroup.className = "row-actions";
-            const adjustButton = document.createElement("button");
-            adjustButton.className = "text-button";
-            adjustButton.type = "button";
-            adjustButton.textContent = "Adjust";
-            adjustButton.setAttribute("aria-label", `Adjust stock for ${product.name}`);
-            adjustButton.addEventListener("click", () => openAdjustDialog(product));
-            const deleteButton = document.createElement("button");
-            deleteButton.className = "text-button text-button-danger";
-            deleteButton.type = "button";
-            deleteButton.textContent = "Remove";
-            deleteButton.setAttribute("aria-label", `Remove ${product.name}`);
-            deleteButton.addEventListener("click", () => removeProduct(product.id));
-            actionGroup.append(adjustButton, deleteButton);
-            actions.append(actionGroup);
-            row.append(actions);
+            row.append(makeActionsCell(
+              makeActionButton("Adjust", `Adjust stock for ${product.name}`, () => openAdjustDialog(product)),
+              makeActionButton("Remove", `Remove ${product.name}`, () => removeProduct(product.id), true)
+            ));
             body.append(row);
           }
           byId("inventory-empty").hidden = state.products.length > 0;
@@ -751,29 +772,20 @@
             .filter((sale) =>
               `${sale.productName} ${dateFormat.format(new Date(sale.date))} ${sale.quantity}`.toLowerCase().includes(query)
             );
-          const pageCount = Math.max(1, Math.ceil(sales.length / PAGE_SIZE));
-          currentPages.sales = Math.min(currentPages.sales, pageCount);
-          const page = currentPages.sales;
-          const pageStart = (page - 1) * PAGE_SIZE;
-          const pageSales = sales.slice(pageStart, pageStart + PAGE_SIZE);
+          const { page, start, items: pageSales } = getPage(sales, "sales");
           for (const [index, sale] of pageSales.entries()) {
             const row = document.createElement("tr");
             row.append(
-              makeCell(String(pageStart + index + 1)),
+              makeCell(String(start + index + 1)),
               makeCell(sale.productName),
               makeCell(dateFormat.format(new Date(sale.date))),
               makeCell(formatItemQuantity(sale.quantity)),
               makeCell(formatWorldLocks(sale.total), "sales-total")
             );
-            const actions = document.createElement("td");
-            const cancelButton = document.createElement("button");
-            cancelButton.className = "text-button text-button-danger";
-            cancelButton.type = "button";
-            cancelButton.textContent = "Cancel sale";
-            cancelButton.setAttribute("aria-label", `Cancel sale of ${sale.quantity} ${sale.productName}`);
-            cancelButton.addEventListener("click", () => cancelSale(sale.id));
-            actions.append(cancelButton);
-            row.append(actions);
+            row.append(makeActionsCell(
+              makeActionButton("Cancel sale", `Cancel sale of ${sale.quantity} ${sale.productName}`,
+                () => cancelSale(sale.id), true)
+            ));
             body.append(row);
           }
           byId("sales-empty").hidden = state.sales.length > 0;
@@ -788,15 +800,11 @@
           const body = byId("activity-rows");
           body.replaceChildren();
           const logs = [...state.logs].sort((a, b) => new Date(b.date) - new Date(a.date));
-          const pageCount = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
-          currentPages.activity = Math.min(currentPages.activity, pageCount);
-          const page = currentPages.activity;
-          const pageStart = (page - 1) * PAGE_SIZE;
-          const pageLogs = logs.slice(pageStart, pageStart + PAGE_SIZE);
+          const { page, start, items: pageLogs } = getPage(logs, "activity");
           for (const [index, log] of pageLogs.entries()) {
             const row = document.createElement("tr");
             row.append(
-              makeCell(String(pageStart + index + 1)),
+              makeCell(String(start + index + 1)),
               makeCell(log.message),
               makeCell(dateFormat.format(new Date(log.date)))
             );
@@ -835,24 +843,12 @@
               finishedCell
             );
 
-            const actions = document.createElement("td");
-            const actionGroup = document.createElement("div");
-            actionGroup.className = "row-actions";
-            const adjustButton = document.createElement("button");
-            adjustButton.className = "text-button";
-            adjustButton.type = "button";
-            adjustButton.textContent = "Adjust";
-            adjustButton.setAttribute("aria-label", `Adjust farm ${farm.item} in ${farm.world}`);
-            adjustButton.addEventListener("click", () => openFarmAdjustDialog(farm));
-            const deleteButton = document.createElement("button");
-            deleteButton.className = "text-button text-button-danger";
-            deleteButton.type = "button";
-            deleteButton.textContent = "Remove";
-            deleteButton.setAttribute("aria-label", `Remove farm ${farm.item} in ${farm.world}`);
-            deleteButton.addEventListener("click", () => removeFarm(farm.id));
-            actionGroup.append(adjustButton, deleteButton);
-            actions.append(actionGroup);
-            row.append(actions);
+            row.append(makeActionsCell(
+              makeActionButton("Adjust", `Adjust farm ${farm.item} in ${farm.world}`,
+                () => openFarmAdjustDialog(farm)),
+              makeActionButton("Remove", `Remove farm ${farm.item} in ${farm.world}`,
+                () => removeFarm(farm.id), true)
+            ));
             body.append(row);
             farmTimers.set(farm.id, timerCell);
             farmCheckboxes.set(farm.id, checkbox);
@@ -936,11 +932,12 @@
           adjustingProductId = product.id;
           byId("adjust-product-name").textContent = `${product.name} · Current stock: ${product.quantity}`;
           const form = byId("adjust-form");
+          form.elements.name.value = product.name;
           form.elements.price.value = product.price;
           form.elements.unitsPerPrice.value = product.unitsPerPrice;
           form.elements.quantity.value = product.quantity;
           adjustDialog.showModal();
-          form.elements.price.focus();
+          form.elements.name.focus();
         }
 
         function openFarmAdjustDialog(farm) {
@@ -1034,6 +1031,23 @@
         byId("sales-search").addEventListener("input", () => {
           currentPages.sales = 1;
           renderSales();
+        });
+        byId("clear-activity-button").addEventListener("click", async () => {
+          if (state.logs.length === 0) return;
+          if (!window.confirm("Clear all activity log entries? This cannot be undone.")) return;
+
+          const previousLogs = state.logs;
+          const previousPage = currentPages.activity;
+          state.logs = [];
+          currentPages.activity = 1;
+          if (!await saveData()) {
+            state.logs = previousLogs;
+            currentPages.activity = previousPage;
+            renderActivity();
+            return;
+          }
+          renderActivity();
+          showToast("Activity log cleared.");
         });
 
         document.querySelectorAll("[data-view]").forEach((button) => {
@@ -1251,20 +1265,26 @@
           const price = Number(form.elements.price.value);
           const unitsPerPrice = Number(form.elements.unitsPerPrice.value);
           const quantity = Number(form.elements.quantity.value);
-          if (!product || !Number.isFinite(price) || price < 0 || !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 || !Number.isInteger(quantity) || quantity < 0) {
-            showToast("Enter a valid bundle quantity, WL price, and whole-number stock quantity.");
+          const name = form.elements.name.value.trim();
+          if (!product || !name || !Number.isFinite(price) || price < 0 || !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 || !Number.isInteger(quantity) || quantity < 0) {
+            showToast("Enter an item name, a valid bundle quantity, WL price, and whole-number stock quantity.");
             return;
           }
+          const previousName = product.name;
           const previousQuantity = product.quantity;
           const previousPrice = product.price;
           const previousUnitsPerPrice = product.unitsPerPrice;
-          if (quantity === previousQuantity && price === previousPrice && unitsPerPrice === previousUnitsPerPrice) {
+          if (name === previousName && quantity === previousQuantity && price === previousPrice && unitsPerPrice === previousUnitsPerPrice) {
             adjustDialog.close();
             return;
           }
+          product.name = name;
           product.quantity = quantity;
           product.price = price;
           product.unitsPerPrice = unitsPerPrice;
+          if (name !== previousName) {
+            addLog(`Item renamed from ${previousName} to ${name}.`);
+          }
           if (quantity !== previousQuantity) {
             addLog(`Stock updated for ${product.name}: from ${previousQuantity} to ${quantity}.`);
           }
@@ -1272,9 +1292,11 @@
             addLog(`Bundle price updated for ${product.name}: from ${formatBundlePrice({ unitsPerPrice: previousUnitsPerPrice, price: previousPrice })} to ${formatBundlePrice({ unitsPerPrice, price })}.`);
           }
           if (!await saveData()) {
+            product.name = previousName;
             product.quantity = previousQuantity;
             product.price = previousPrice;
             product.unitsPerPrice = previousUnitsPerPrice;
+            if (name !== previousName) state.logs.pop();
             if (quantity !== previousQuantity) state.logs.pop();
             if (price !== previousPrice || unitsPerPrice !== previousUnitsPerPrice) state.logs.pop();
             return;
