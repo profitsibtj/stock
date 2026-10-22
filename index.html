@@ -113,7 +113,7 @@
       }
       h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
       .panel-description { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
-      .toolbar { display: flex; align-items: center; gap: 9px; }
+      .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
       .search {
         width: 200px;
         height: 36px;
@@ -141,6 +141,8 @@
       .ssp-inventory-table { table-layout: fixed; }
       .ssp-inventory-table td:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ssp-price-cell { text-align: center; }
+      .ssp-price-button { width: 100%; padding: 5px 4px; border: 0; border-radius: 5px; background: transparent; color: var(--green); font: inherit; }
+      .ssp-price-button:hover { background: var(--green-soft); }
       th { padding: 11px 22px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .055em; text-transform: uppercase; }
       td { padding: 14px 22px; border-top: 1px solid #f0f2f4; vertical-align: middle; }
       tbody tr:first-child td { border-top: 0; }
@@ -188,6 +190,10 @@
         border-radius: 13px;
         box-shadow: 0 20px 60px rgb(23 31 37 / 18%);
       }
+      .compare-dialog { width: calc(100vw - 32px); max-width: 1600px; height: calc(100vh - 32px); max-height: none; }
+      .compare-dialog form { display: grid; height: 100%; grid-template-rows: auto minmax(0, 1fr) auto; }
+      .compare-dialog .dialog-body { min-height: 0; overflow: auto; }
+      .compare-dialog .table-wrap { max-height: 100%; }
       dialog::backdrop { background: rgb(22 29 35 / 35%); }
       .dialog-header { padding: 20px 22px 15px; border-bottom: 1px solid var(--line); }
       .dialog-header h2 { font-size: 18px; }
@@ -291,6 +297,7 @@
               <option value="ssp">Small Seed Pack (SSP)</option>
               <option value="regular">Regular Items</option>
             </select>
+            <button class="button" id="manage-ssp-prices-button" type="button">Manage SSP Prices</button>
             <input class="search" id="inventory-search" type="search" placeholder="Search items..." aria-label="Search inventory">
             <select id="inventory-status-filter" aria-label="Filter inventory by status">
               <option value="all">All statuses</option>
@@ -422,10 +429,11 @@
       </form>
     </dialog>
 
-    <dialog id="compare-dialog" aria-labelledby="compare-dialog-title">
+    <dialog id="compare-dialog" class="compare-dialog" aria-labelledby="compare-dialog-title">
       <form id="compare-form">
         <div class="dialog-header"><h2 id="compare-dialog-title">Compare World Prices</h2></div>
         <div class="dialog-body">
+          <label class="field" id="compare-product-label" hidden>SSP Item<select name="product" id="compare-product-select"></select></label>
           <p id="compare-product-price" class="panel-description" style="margin:0"></p>
           <label class="field">Other World<input name="world" required maxlength="80" placeholder="Example: BUYITEM"></label>
           <label class="field" id="compare-units-label">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
@@ -798,6 +806,7 @@
           );
           byId("inventory-heading").textContent =
             category === "ssp" ? "Small Seed Pack (SSP)" : "Regular Items";
+          byId("manage-ssp-prices-button").hidden = category !== "ssp";
           byId("ssp-inventory-table").hidden = category !== "ssp";
           byId("regular-inventory-table").hidden = category !== "regular";
           byId("ssp-inventory-pagination").hidden = category !== "ssp";
@@ -847,7 +856,7 @@
             .sort((a, b) => a.localeCompare(b));
           const columns = byId("ssp-inventory-columns");
           columns.replaceChildren();
-          for (const width of [64, 230, 100, ...worlds.map(() => 100), 210]) {
+          for (const width of [64, 230, 100, 125, ...worlds.map(() => 110), 150]) {
             const column = document.createElement("col");
             column.style.width = `${width}px`;
             columns.append(column);
@@ -855,7 +864,7 @@
           const head = byId("ssp-inventory-head");
           head.replaceChildren();
           const headerRow = document.createElement("tr");
-          for (const label of ["No.", "Name", "Stock", ...worlds, "Actions"]) {
+          for (const label of ["No.", "Name", "Stock", "Our Price (Seeds / WL)", ...worlds, "Actions"]) {
             const cell = document.createElement("th");
             cell.scope = "col";
             cell.textContent = label;
@@ -864,7 +873,7 @@
           head.append(headerRow);
 
           const table = byId("ssp-inventory-table");
-          table.style.minWidth = `${64 + 230 + 100 + worlds.length * 100 + 210}px`;
+          table.style.minWidth = `${64 + 230 + 100 + 125 + worlds.length * 110 + 150}px`;
           const { page, start, items: pageProducts } = getPage(products, "inventorySsp");
           const body = byId("ssp-inventory-rows");
           body.replaceChildren();
@@ -873,7 +882,10 @@
             row.append(
               makeCell(String(start + index + 1)),
               makeCell(product.name, "item-name"),
-              makeCell(String(product.quantity), "quantity")
+              makeCell(String(product.quantity), "quantity"),
+              makeCell(product.price > 0
+                ? worldLocks.format(product.unitsPerPrice / product.price)
+                : "—", "ssp-price-cell")
             );
             for (const world of worlds) {
               const comparison = product.worldPrices.find((entry) =>
@@ -882,10 +894,18 @@
               const amount = comparison && comparison.price > 0
                 ? worldLocks.format(comparison.unitsPerPrice / comparison.price)
                 : "—";
-              row.append(makeCell(amount, "ssp-price-cell"));
+              const priceCell = document.createElement("td");
+              priceCell.className = "ssp-price-cell";
+              const priceButton = document.createElement("button");
+              priceButton.type = "button";
+              priceButton.className = "ssp-price-button";
+              priceButton.textContent = amount;
+              priceButton.setAttribute("aria-label", `${comparison ? "Edit" : "Add"} ${world} price for ${product.name}`);
+              priceButton.addEventListener("click", () => openCompareDialog(product, world));
+              priceCell.append(priceButton);
+              row.append(priceCell);
             }
             row.append(makeActionsCell(
-              makeActionButton("Prices", `Edit SSP prices for ${product.name}`, () => openCompareDialog(product)),
               makeActionButton("Adjust", `Adjust stock for ${product.name}`, () => openAdjustDialog(product)),
               makeActionButton("Remove", `Remove ${product.name}`, () => removeProduct(product.id), true)
             ));
@@ -1076,11 +1096,23 @@
           form.elements.name.focus();
         }
 
-        function openCompareDialog(product) {
+        function openCompareDialog(product, world = "") {
           comparingProductId = product.id;
           const form = byId("compare-form");
           form.reset();
           const isSsp = product.category === "ssp";
+          byId("compare-product-label").hidden = !isSsp;
+          if (isSsp) {
+            const select = byId("compare-product-select");
+            select.replaceChildren();
+            for (const item of state.products.filter((entry) => entry.category === "ssp")) {
+              const option = document.createElement("option");
+              option.value = item.id;
+              option.textContent = item.name;
+              select.append(option);
+            }
+            select.value = product.id;
+          }
           form.elements.unitsPerPrice.closest("label").firstChild.textContent =
             isSsp ? "Seeds per 1 WL" : "Items per Price";
           byId("compare-price-label").hidden = isSsp;
@@ -1089,8 +1121,26 @@
             : "Enter the quantity and price for this world.";
           byId("compare-dialog-title").textContent = isSsp ? "Compare SSP Prices" : "Compare World Prices";
           renderWorldPrices(product);
+          if (world) {
+            form.elements.world.value = world;
+            const comparison = product.worldPrices.find((entry) =>
+              entry.world.toLowerCase() === world.toLowerCase()
+            );
+            if (comparison) form.elements.unitsPerPrice.value = product.category === "ssp"
+              ? comparison.unitsPerPrice / comparison.price
+              : comparison.unitsPerPrice;
+          }
           compareDialog.showModal();
           form.elements.world.focus();
+        }
+
+        function openSspPriceManager() {
+          const product = state.products.find((item) => item.category === "ssp");
+          if (!product) {
+            showToast("Add an SSP item before managing world prices.");
+            return;
+          }
+          openCompareDialog(product);
         }
 
         function renderWorldPrices(product) {
@@ -1171,6 +1221,14 @@
           byId("world-price-empty").hidden = product.worldPrices.length > 0;
         }
 
+        function selectCompareProduct(productId) {
+          const product = state.products.find((item) => item.id === productId && item.category === "ssp");
+          if (!product) return;
+          comparingProductId = product.id;
+          byId("compare-form").elements.world.value = "";
+          renderWorldPrices(product);
+        }
+
         async function removeWorldPrice(product, world) {
           const previousPrices = product.worldPrices;
           product.worldPrices = previousPrices.filter((entry) => entry.world !== world);
@@ -1179,6 +1237,7 @@
             renderWorldPrices(product);
             return;
           }
+          renderInventory();
           renderWorldPrices(product);
           showToast(`Comparison price for ${world} removed.`);
         }
@@ -1276,9 +1335,13 @@
         byId("inventory-category-filter").addEventListener("change", () => {
           renderInventory();
         });
+        byId("manage-ssp-prices-button").addEventListener("click", openSspPriceManager);
         byId("sales-search").addEventListener("input", () => {
           currentPages.sales = 1;
           renderSales();
+        });
+        byId("compare-product-select").addEventListener("change", (event) => {
+          selectCompareProduct(event.currentTarget.value);
         });
         byId("compare-form").addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -1307,7 +1370,9 @@
             return;
           }
           renderWorldPrices(product);
+          renderInventory();
           form.reset();
+          form.elements.product.value = product.id;
           showToast(`Price for ${world} saved.`);
         });
         byId("clear-activity-button").addEventListener("click", async () => {
