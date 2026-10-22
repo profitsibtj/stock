@@ -138,6 +138,9 @@
       .inventory-table .status-column { width: 150px; }
       .inventory-table .actions-column { width: 280px; }
       .inventory-table td:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ssp-inventory-table { table-layout: fixed; }
+      .ssp-inventory-table td:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ssp-price-cell { text-align: center; }
       th { padding: 11px 22px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .055em; text-transform: uppercase; }
       td { padding: 14px 22px; border-top: 1px solid #f0f2f4; vertical-align: middle; }
       tbody tr:first-child td { border-top: 0; }
@@ -284,6 +287,10 @@
         <div class="panel-heading">
           <h2 id="inventory-heading">Inventory</h2>
           <div class="toolbar">
+            <select id="inventory-category-filter" aria-label="Inventory category">
+              <option value="ssp">Small Seed Pack (SSP)</option>
+              <option value="regular">Regular Items</option>
+            </select>
             <input class="search" id="inventory-search" type="search" placeholder="Search items..." aria-label="Search inventory">
             <select id="inventory-status-filter" aria-label="Filter inventory by status">
               <option value="all">All statuses</option>
@@ -294,15 +301,21 @@
           </div>
         </div>
         <div class="table-wrap">
-          <table class="inventory-table">
+          <table class="inventory-table" id="regular-inventory-table" hidden>
             <colgroup><col class="item-column"><col class="name-column"><col class="price-column"><col class="stock-column"><col class="status-column"><col class="actions-column"></colgroup>
             <thead><tr><th scope="col">No.</th><th scope="col">Item</th><th scope="col">Price per Bundle</th><th scope="col">Stock</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-            <tbody id="inventory-rows"></tbody>
+            <tbody id="regular-inventory-rows"></tbody>
           </table>
-          <div class="empty-state" id="inventory-empty" hidden>No items available. Add an item to get started.</div>
+          <table class="ssp-inventory-table" id="ssp-inventory-table">
+            <colgroup id="ssp-inventory-columns"></colgroup>
+            <thead id="ssp-inventory-head"></thead>
+            <tbody id="ssp-inventory-rows"></tbody>
+          </table>
+          <div class="empty-state" id="inventory-empty" hidden>No items available in this category.</div>
           <div class="empty-state" id="search-empty" hidden>No items match your search or status filter.</div>
         </div>
-        <nav class="pagination" id="inventory-pagination" aria-label="Inventory pages" hidden></nav>
+        <nav class="pagination" id="ssp-inventory-pagination" aria-label="SSP inventory pages" hidden></nav>
+        <nav class="pagination" id="regular-inventory-pagination" aria-label="Regular inventory pages" hidden></nav>
       </section>
 
       <section class="panel" aria-labelledby="sales-heading">
@@ -373,6 +386,7 @@
         <div class="dialog-header"><h2 id="product-dialog-title">Add Product</h2></div>
         <div class="dialog-body">
           <label class="field">Item Name<input name="name" required maxlength="80" placeholder="Example: World Lock"></label>
+          <label class="field">Category<select name="category" required><option value="ssp">Small Seed Pack (SSP)</option><option value="regular">Regular Item</option></select></label>
           <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" placeholder="1"></label>
           <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="1" value="1"></label>
           <label class="field">Initial Stock Quantity<input name="quantity" type="number" required min="0" step="1" placeholder="0"></label>
@@ -399,6 +413,7 @@
         <div class="dialog-body">
           <p id="adjust-product-name" style="margin:0;color:#77818d"></p>
           <label class="field">Item Name<input name="name" required maxlength="80" placeholder="Example: World Lock"></label>
+          <label class="field">Category<select name="category" required><option value="ssp">Small Seed Pack (SSP)</option><option value="regular">Regular Item</option></select></label>
           <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" placeholder="1"></label>
           <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="1" value="1"></label>
           <label class="field">New Stock Quantity<input name="quantity" type="number" required min="0" step="1" placeholder="0"></label>
@@ -413,12 +428,12 @@
         <div class="dialog-body">
           <p id="compare-product-price" class="panel-description" style="margin:0"></p>
           <label class="field">Other World<input name="world" required maxlength="80" placeholder="Example: BUYITEM"></label>
-          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
-          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" value="1"></label>
-          <p class="panel-description" style="margin:0">Examples: 50 items / 1 WL = 0.02 WL per item; 1 item / 50 WL = 50 WL per item.</p>
+          <label class="field" id="compare-units-label">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
+          <label class="field" id="compare-price-label">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" value="1"></label>
+          <p class="panel-description" id="compare-help" style="margin:0">Enter the quantity and price for this world.</p>
           <div class="table-wrap">
             <table>
-              <thead><tr><th scope="col">World</th><th scope="col">Price per Bundle</th><th scope="col">Price / Item</th><th scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+              <thead id="world-price-head"></thead>
               <tbody id="world-price-rows"></tbody>
             </table>
             <div class="empty-state" id="world-price-empty" hidden>No comparison prices yet.</div>
@@ -495,7 +510,7 @@
         let adjustingFarmId = null;
         let toastTimer;
         let saveQueue = Promise.resolve();
-        const currentPages = { inventory: 1, sales: 1, activity: 1 };
+        const currentPages = { inventorySsp: 1, inventoryRegular: 1, sales: 1, activity: 1 };
         const farmTimers = new Map();
         const farmCheckboxes = new Map();
 
@@ -563,6 +578,10 @@
           if (data.farms === undefined) data.farms = [];
           if (!Array.isArray(data.farms)) throw new Error("The shared farm tracker data has an invalid format.");
           for (const product of data.products) {
+            if (product.category === undefined) product.category = "ssp";
+            if (product.category !== "ssp" && product.category !== "regular") {
+              throw new Error(`Saved category for ${product.name} is invalid.`);
+            }
             if (product.unitsPerPrice === undefined) product.unitsPerPrice = 1;
             if (!Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1) {
               throw new Error(`Saved bundle quantity for ${product.name} is invalid.`);
@@ -769,15 +788,30 @@
         }
 
         function renderInventory() {
-          const body = byId("inventory-rows");
+          const category = byId("inventory-category-filter").value;
           const query = byId("inventory-search").value.trim().toLowerCase();
           const statusFilter = byId("inventory-status-filter").value;
-          body.replaceChildren();
-          const products = state.products.filter((product) =>
+          const categoryProducts = state.products.filter((product) => product.category === category);
+          const products = categoryProducts.filter((product) =>
             product.name.toLowerCase().includes(query) &&
             (statusFilter === "all" || inventoryStatus(product).key === statusFilter)
           );
-          const { page, start, items: pageProducts } = getPage(products, "inventory");
+          byId("inventory-heading").textContent =
+            category === "ssp" ? "Small Seed Pack (SSP)" : "Regular Items";
+          byId("ssp-inventory-table").hidden = category !== "ssp";
+          byId("regular-inventory-table").hidden = category !== "regular";
+          byId("ssp-inventory-pagination").hidden = category !== "ssp";
+          byId("regular-inventory-pagination").hidden = category !== "regular";
+          if (category === "ssp") renderSspInventory(products);
+          else renderRegularInventory(products);
+          byId("inventory-empty").hidden = categoryProducts.length > 0;
+          byId("search-empty").hidden = categoryProducts.length === 0 || products.length > 0;
+        }
+
+        function renderRegularInventory(products) {
+          const body = byId("regular-inventory-rows");
+          body.replaceChildren();
+          const { page, start, items: pageProducts } = getPage(products, "inventoryRegular");
           for (const [index, product] of pageProducts.entries()) {
             const row = document.createElement("tr");
             row.append(
@@ -800,10 +834,65 @@
             ));
             body.append(row);
           }
-          byId("inventory-empty").hidden = state.products.length > 0;
-          byId("search-empty").hidden = state.products.length === 0 || products.length > 0;
-          renderPagination("inventory-pagination", products.length, page, (nextPage) => {
-            currentPages.inventory = nextPage;
+          renderPagination("regular-inventory-pagination", products.length, page, (nextPage) => {
+            currentPages.inventoryRegular = nextPage;
+            renderInventory();
+          });
+        }
+
+        function renderSspInventory(products) {
+          const worlds = [...new Set(state.products
+            .filter((product) => product.category === "ssp")
+            .flatMap((product) => product.worldPrices.map((comparison) => comparison.world)))]
+            .sort((a, b) => a.localeCompare(b));
+          const columns = byId("ssp-inventory-columns");
+          columns.replaceChildren();
+          for (const width of [64, 230, 100, ...worlds.map(() => 100), 210]) {
+            const column = document.createElement("col");
+            column.style.width = `${width}px`;
+            columns.append(column);
+          }
+          const head = byId("ssp-inventory-head");
+          head.replaceChildren();
+          const headerRow = document.createElement("tr");
+          for (const label of ["No.", "Name", "Stock", ...worlds, "Actions"]) {
+            const cell = document.createElement("th");
+            cell.scope = "col";
+            cell.textContent = label;
+            headerRow.append(cell);
+          }
+          head.append(headerRow);
+
+          const table = byId("ssp-inventory-table");
+          table.style.minWidth = `${64 + 230 + 100 + worlds.length * 100 + 210}px`;
+          const { page, start, items: pageProducts } = getPage(products, "inventorySsp");
+          const body = byId("ssp-inventory-rows");
+          body.replaceChildren();
+          for (const [index, product] of pageProducts.entries()) {
+            const row = document.createElement("tr");
+            row.append(
+              makeCell(String(start + index + 1)),
+              makeCell(product.name, "item-name"),
+              makeCell(String(product.quantity), "quantity")
+            );
+            for (const world of worlds) {
+              const comparison = product.worldPrices.find((entry) =>
+                entry.world.toLowerCase() === world.toLowerCase()
+              );
+              const amount = comparison && comparison.price > 0
+                ? worldLocks.format(comparison.unitsPerPrice / comparison.price)
+                : "—";
+              row.append(makeCell(amount, "ssp-price-cell"));
+            }
+            row.append(makeActionsCell(
+              makeActionButton("Prices", `Edit SSP prices for ${product.name}`, () => openCompareDialog(product)),
+              makeActionButton("Adjust", `Adjust stock for ${product.name}`, () => openAdjustDialog(product)),
+              makeActionButton("Remove", `Remove ${product.name}`, () => removeProduct(product.id), true)
+            ));
+            body.append(row);
+          }
+          renderPagination("ssp-inventory-pagination", products.length, page, (nextPage) => {
+            currentPages.inventorySsp = nextPage;
             renderInventory();
           });
         }
@@ -963,7 +1052,8 @@
         }
 
         function render() {
-          currentPages.inventory = 1;
+          currentPages.inventorySsp = 1;
+          currentPages.inventoryRegular = 1;
           currentPages.sales = 1;
           currentPages.activity = 1;
           renderSummary();
@@ -978,6 +1068,7 @@
           byId("adjust-product-name").textContent = `${product.name} · Current stock: ${product.quantity}`;
           const form = byId("adjust-form");
           form.elements.name.value = product.name;
+          form.elements.category.value = product.category;
           form.elements.price.value = product.price;
           form.elements.unitsPerPrice.value = product.unitsPerPrice;
           form.elements.quantity.value = product.quantity;
@@ -989,6 +1080,14 @@
           comparingProductId = product.id;
           const form = byId("compare-form");
           form.reset();
+          const isSsp = product.category === "ssp";
+          form.elements.unitsPerPrice.closest("label").firstChild.textContent =
+            isSsp ? "Seeds per 1 WL" : "Items per Price";
+          byId("compare-price-label").hidden = isSsp;
+          byId("compare-help").textContent = isSsp
+            ? "Enter how many seeds this world sells for 1 WL."
+            : "Enter the quantity and price for this world.";
+          byId("compare-dialog-title").textContent = isSsp ? "Compare SSP Prices" : "Compare World Prices";
           renderWorldPrices(product);
           compareDialog.showModal();
           form.elements.world.focus();
@@ -998,8 +1097,24 @@
           const body = byId("world-price-rows");
           body.replaceChildren();
           const ownPrice = product.price / product.unitsPerPrice;
+          const ownQuantityPerWl = product.price > 0 ? product.unitsPerPrice / product.price : null;
+          const header = document.createElement("tr");
+          const columns = product.category === "ssp"
+            ? ["World", "Seeds / WL", "Difference", "Actions"]
+            : ["World", "Price per Bundle", "Price / Item", "Difference", "Actions"];
+          byId("world-price-head").replaceChildren(header);
+          for (const label of columns) {
+            const cell = document.createElement("th");
+            cell.scope = "col";
+            cell.textContent = label;
+            header.append(cell);
+          }
           byId("compare-product-price").textContent =
-            `Your price: ${formatBundlePrice(product)} (${formatWorldLocks(ownPrice)} per item)`;
+            product.category === "ssp"
+              ? ownQuantityPerWl === null
+                ? "Your SSP price has not been set."
+                : `Your SSP price: ${worldLocks.format(ownQuantityPerWl)} seeds per 1 WL`
+              : `Your price: ${formatBundlePrice(product)} (${formatWorldLocks(ownPrice)} per item)`;
           for (const comparison of [...product.worldPrices].sort((a, b) => a.world.localeCompare(b.world))) {
             const comparisonPrice = comparison.price / comparison.unitsPerPrice;
             const difference = Math.round((comparisonPrice - ownPrice) * 100) / 100;
@@ -1007,20 +1122,42 @@
               ? "Same price"
               : `${formatWorldLocks(Math.abs(difference))} ${difference < 0 ? "cheaper" : "higher"}`;
             const row = document.createElement("tr");
-            row.append(
-              makeCell(comparison.world),
-              makeCell(formatBundlePrice(comparison)),
-              makeCell(`${formatWorldLocks(comparisonPrice)} / item`),
-              makeCell(differenceText)
-            );
+            if (product.category === "ssp") {
+              const quantityPerWl = comparison.price > 0
+                ? comparison.unitsPerPrice / comparison.price
+                : null;
+              const quantityDifference = quantityPerWl === null || ownQuantityPerWl === null
+                ? null
+                : quantityPerWl - ownQuantityPerWl;
+              row.append(
+                makeCell(comparison.world),
+                makeCell(quantityPerWl === null ? "—" : `${worldLocks.format(quantityPerWl)} seeds / WL`),
+                makeCell(quantityDifference === null
+                  ? "—"
+                  : quantityDifference === 0
+                  ? "Same amount"
+                  : `${worldLocks.format(Math.abs(quantityDifference))} ${quantityDifference > 0 ? "more" : "fewer"} seeds / WL`)
+              );
+            } else {
+              row.append(
+                makeCell(comparison.world),
+                makeCell(formatBundlePrice(comparison)),
+                makeCell(`${formatWorldLocks(comparisonPrice)} / item`),
+                makeCell(differenceText)
+              );
+            }
             row.append(makeActionsCell(makeActionButton(
               "Edit",
               `Edit price for ${comparison.world}`,
               () => {
                 const form = byId("compare-form");
                 form.elements.world.value = comparison.world;
-                form.elements.unitsPerPrice.value = comparison.unitsPerPrice;
-                form.elements.price.value = comparison.price;
+                form.elements.unitsPerPrice.value = product.category === "ssp"
+                  ? Number.isInteger(comparison.unitsPerPrice / comparison.price)
+                    ? comparison.unitsPerPrice / comparison.price
+                    : ""
+                  : comparison.unitsPerPrice;
+                form.elements.price.value = product.category === "ssp" ? 1 : comparison.price;
                 form.elements.world.focus();
               }
             ), makeActionButton(
@@ -1127,11 +1264,16 @@
         window.setInterval(updateClock, 1000);
         window.setInterval(updateFarmTimers, 1000);
         byId("inventory-search").addEventListener("input", () => {
-          currentPages.inventory = 1;
+          currentPages.inventorySsp = 1;
+          currentPages.inventoryRegular = 1;
           renderInventory();
         });
         byId("inventory-status-filter").addEventListener("change", () => {
-          currentPages.inventory = 1;
+          currentPages.inventorySsp = 1;
+          currentPages.inventoryRegular = 1;
+          renderInventory();
+        });
+        byId("inventory-category-filter").addEventListener("change", () => {
           renderInventory();
         });
         byId("sales-search").addEventListener("input", () => {
@@ -1144,7 +1286,7 @@
           const form = event.currentTarget;
           const world = form.elements.world.value.trim();
           const unitsPerPrice = Number(form.elements.unitsPerPrice.value);
-          const price = Number(form.elements.price.value);
+          const price = product && product.category === "ssp" ? 1 : Number(form.elements.price.value);
           if (!product || !world || !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 ||
             !Number.isFinite(price) || price < 0) {
             showToast("Enter a world name, a valid item quantity, and a valid price in WL.");
@@ -1199,9 +1341,11 @@
         });
 
         byId("add-product-button").addEventListener("click", () => {
-          byId("product-form").reset();
+          const form = byId("product-form");
+          form.reset();
+          form.elements.category.value = byId("inventory-category-filter").value;
           productDialog.showModal();
-          byId("product-form").elements.name.focus();
+          form.elements.name.focus();
         });
 
         byId("add-farm-button").addEventListener("click", () => {
@@ -1300,12 +1444,16 @@
           const product = {
             id: crypto.randomUUID(),
             name: form.elements.name.value.trim(),
+            category: form.elements.category.value,
             unitsPerPrice: Number(form.elements.unitsPerPrice.value),
             price: Number(form.elements.price.value),
             quantity: Number(form.elements.quantity.value),
             worldPrices: []
           };
-          if (!product.name || !Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1 || !Number.isFinite(product.price) || product.price < 0 || !Number.isInteger(product.quantity) || product.quantity < 0) {
+          if (!product.name || !["ssp", "regular"].includes(product.category) ||
+            !Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1 ||
+            !Number.isFinite(product.price) || product.price < 0 ||
+            !Number.isInteger(product.quantity) || product.quantity < 0) {
             showToast("Enter an item name, a valid bundle quantity, price in WL, and whole-number stock quantity.");
             return;
           }
@@ -1403,24 +1551,33 @@
           const unitsPerPrice = Number(form.elements.unitsPerPrice.value);
           const quantity = Number(form.elements.quantity.value);
           const name = form.elements.name.value.trim();
-          if (!product || !name || !Number.isFinite(price) || price < 0 || !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 || !Number.isInteger(quantity) || quantity < 0) {
+          const category = form.elements.category.value;
+          if (!product || !name || !["ssp", "regular"].includes(category) ||
+            !Number.isFinite(price) || price < 0 ||
+            !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 ||
+            !Number.isInteger(quantity) || quantity < 0) {
             showToast("Enter an item name, a valid bundle quantity, WL price, and whole-number stock quantity.");
             return;
           }
           const previousName = product.name;
+          const previousCategory = product.category;
           const previousQuantity = product.quantity;
           const previousPrice = product.price;
           const previousUnitsPerPrice = product.unitsPerPrice;
-          if (name === previousName && quantity === previousQuantity && price === previousPrice && unitsPerPrice === previousUnitsPerPrice) {
+          if (name === previousName && category === previousCategory && quantity === previousQuantity && price === previousPrice && unitsPerPrice === previousUnitsPerPrice) {
             adjustDialog.close();
             return;
           }
           product.name = name;
+          product.category = category;
           product.quantity = quantity;
           product.price = price;
           product.unitsPerPrice = unitsPerPrice;
           if (name !== previousName) {
             addLog(`Item renamed from ${previousName} to ${name}.`);
+          }
+          if (category !== previousCategory) {
+            addLog(`Item category changed for ${product.name}: ${previousCategory === "ssp" ? "SSP" : "Regular"} to ${category === "ssp" ? "SSP" : "Regular"}.`);
           }
           if (quantity !== previousQuantity) {
             addLog(`Stock updated for ${product.name}: from ${previousQuantity} to ${quantity}.`);
@@ -1430,10 +1587,12 @@
           }
           if (!await saveData()) {
             product.name = previousName;
+            product.category = previousCategory;
             product.quantity = previousQuantity;
             product.price = previousPrice;
             product.unitsPerPrice = previousUnitsPerPrice;
             if (name !== previousName) state.logs.pop();
+            if (category !== previousCategory) state.logs.pop();
             if (quantity !== previousQuantity) state.logs.pop();
             if (price !== previousPrice || unitsPerPrice !== previousUnitsPerPrice) state.logs.pop();
             return;
