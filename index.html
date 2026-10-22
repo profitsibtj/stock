@@ -398,6 +398,25 @@
       </form>
     </dialog>
 
+    <dialog id="compare-dialog" aria-labelledby="compare-dialog-title">
+      <form id="compare-form">
+        <div class="dialog-header"><h2 id="compare-dialog-title">Compare World Prices</h2></div>
+        <div class="dialog-body">
+          <p id="compare-product-price" class="panel-description" style="margin:0"></p>
+          <label class="field">Other World<input name="world" required maxlength="80" placeholder="Example: BUYITEM"></label>
+          <label class="field">Price per Item (WL)<input name="price" type="number" required min="0" step="0.01" placeholder="0.5"></label>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">World</th><th scope="col">Price / Item</th><th scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+              <tbody id="world-price-rows"></tbody>
+            </table>
+            <div class="empty-state" id="world-price-empty" hidden>No comparison prices yet.</div>
+          </div>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Close</button><button class="button button-primary" type="submit">Save Price</button></div>
+      </form>
+    </dialog>
+
     <dialog id="farm-dialog" aria-labelledby="farm-dialog-title">
       <form id="farm-form">
         <div class="dialog-header"><h2 id="farm-dialog-title">Add Farm</h2></div>
@@ -456,10 +475,12 @@
         const productDialog = byId("product-dialog");
         const saleDialog = byId("sale-dialog");
         const adjustDialog = byId("adjust-dialog");
+        const compareDialog = byId("compare-dialog");
         const farmDialog = byId("farm-dialog");
         const farmAdjustDialog = byId("farm-adjust-dialog");
         let state = structuredClone(defaultData);
         let adjustingProductId = null;
+        let comparingProductId = null;
         let adjustingFarmId = null;
         let toastTimer;
         let saveQueue = Promise.resolve();
@@ -534,6 +555,13 @@
             if (product.unitsPerPrice === undefined) product.unitsPerPrice = 1;
             if (!Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1) {
               throw new Error(`Saved bundle quantity for ${product.name} is invalid.`);
+            }
+            if (product.worldPrices === undefined) product.worldPrices = [];
+            if (!Array.isArray(product.worldPrices) || product.worldPrices.some((comparison) =>
+              !comparison || typeof comparison.world !== "string" || !comparison.world.trim() ||
+              !Number.isFinite(comparison.price) || comparison.price < 0
+            )) {
+              throw new Error(`Saved world prices for ${product.name} are invalid.`);
             }
           }
           for (const farm of data.farms) {
@@ -750,6 +778,7 @@
             statusCell.append(badge);
             row.append(statusCell);
             row.append(makeActionsCell(
+              makeActionButton("Compare", `Compare prices for ${product.name}`, () => openCompareDialog(product)),
               makeActionButton("Adjust", `Adjust stock for ${product.name}`, () => openAdjustDialog(product)),
               makeActionButton("Remove", `Remove ${product.name}`, () => removeProduct(product.id), true)
             ));
@@ -940,6 +969,53 @@
           form.elements.name.focus();
         }
 
+        function openCompareDialog(product) {
+          comparingProductId = product.id;
+          byId("compare-form").reset();
+          renderWorldPrices(product);
+          compareDialog.showModal();
+          byId("compare-form").elements.world.focus();
+        }
+
+        function renderWorldPrices(product) {
+          const body = byId("world-price-rows");
+          body.replaceChildren();
+          const ownPrice = product.price / product.unitsPerPrice;
+          byId("compare-product-price").textContent = `Your price: ${formatWorldLocks(ownPrice)} per item`;
+          for (const comparison of [...product.worldPrices].sort((a, b) => a.world.localeCompare(b.world))) {
+            const difference = Math.round((comparison.price - ownPrice) * 100) / 100;
+            const differenceText = difference === 0
+              ? "Same price"
+              : `${formatWorldLocks(Math.abs(difference))} ${difference < 0 ? "cheaper" : "higher"}`;
+            const row = document.createElement("tr");
+            row.append(
+              makeCell(comparison.world),
+              makeCell(`${formatWorldLocks(comparison.price)} / item`),
+              makeCell(differenceText)
+            );
+            row.append(makeActionsCell(makeActionButton(
+              "Remove",
+              `Remove price for ${comparison.world}`,
+              () => removeWorldPrice(product, comparison.world),
+              true
+            )));
+            body.append(row);
+          }
+          byId("world-price-empty").hidden = product.worldPrices.length > 0;
+        }
+
+        async function removeWorldPrice(product, world) {
+          const previousPrices = product.worldPrices;
+          product.worldPrices = previousPrices.filter((entry) => entry.world !== world);
+          if (!await saveData()) {
+            product.worldPrices = previousPrices;
+            renderWorldPrices(product);
+            return;
+          }
+          renderWorldPrices(product);
+          showToast(`Comparison price for ${world} removed.`);
+        }
+
         function openFarmAdjustDialog(farm) {
           adjustingFarmId = farm.id;
           byId("farm-adjust-name").textContent = `${farm.item} in ${farm.world}`;
@@ -1031,6 +1107,34 @@
         byId("sales-search").addEventListener("input", () => {
           currentPages.sales = 1;
           renderSales();
+        });
+        byId("compare-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const product = state.products.find((item) => item.id === comparingProductId);
+          const form = event.currentTarget;
+          const world = form.elements.world.value.trim();
+          const price = Number(form.elements.price.value);
+          if (!product || !world || !Number.isFinite(price) || price < 0) {
+            showToast("Enter a world name and a valid price per item.");
+            return;
+          }
+
+          const previousPrices = product.worldPrices;
+          const existingIndex = previousPrices.findIndex((entry) =>
+            entry.world.toLowerCase() === world.toLowerCase()
+          );
+          product.worldPrices = [...previousPrices];
+          const comparison = { world, price };
+          if (existingIndex === -1) product.worldPrices.push(comparison);
+          else product.worldPrices[existingIndex] = comparison;
+          if (!await saveData()) {
+            product.worldPrices = previousPrices;
+            renderWorldPrices(product);
+            return;
+          }
+          renderWorldPrices(product);
+          form.reset();
+          showToast(`Price for ${world} saved.`);
         });
         byId("clear-activity-button").addEventListener("click", async () => {
           if (state.logs.length === 0) return;
@@ -1166,7 +1270,8 @@
             name: form.elements.name.value.trim(),
             unitsPerPrice: Number(form.elements.unitsPerPrice.value),
             price: Number(form.elements.price.value),
-            quantity: Number(form.elements.quantity.value)
+            quantity: Number(form.elements.quantity.value),
+            worldPrices: []
           };
           if (!product.name || !Number.isInteger(product.unitsPerPrice) || product.unitsPerPrice < 1 || !Number.isFinite(product.price) || product.price < 0 || !Number.isInteger(product.quantity) || product.quantity < 0) {
             showToast("Enter an item name, a valid bundle quantity, price in WL, and whole-number stock quantity.");
