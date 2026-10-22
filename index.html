@@ -130,6 +130,14 @@
       input:focus, select:focus { border-color: #78a992; box-shadow: 0 0 0 3px rgb(34 122 87 / 10%); outline: none; }
       .table-wrap { overflow-x: auto; }
       table { width: 100%; border-collapse: collapse; text-align: left; }
+      .inventory-table { min-width: 1014px; table-layout: fixed; }
+      .inventory-table .item-column { width: 64px; }
+      .inventory-table .name-column { width: 230px; }
+      .inventory-table .price-column { width: 190px; }
+      .inventory-table .stock-column { width: 100px; }
+      .inventory-table .status-column { width: 150px; }
+      .inventory-table .actions-column { width: 280px; }
+      .inventory-table td:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       th { padding: 11px 22px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .055em; text-transform: uppercase; }
       td { padding: 14px 22px; border-top: 1px solid #f0f2f4; vertical-align: middle; }
       tbody tr:first-child td { border-top: 0; }
@@ -286,7 +294,8 @@
           </div>
         </div>
         <div class="table-wrap">
-          <table>
+          <table class="inventory-table">
+            <colgroup><col class="item-column"><col class="name-column"><col class="price-column"><col class="stock-column"><col class="status-column"><col class="actions-column"></colgroup>
             <thead><tr><th scope="col">No.</th><th scope="col">Item</th><th scope="col">Price per Bundle</th><th scope="col">Stock</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
             <tbody id="inventory-rows"></tbody>
           </table>
@@ -404,10 +413,12 @@
         <div class="dialog-body">
           <p id="compare-product-price" class="panel-description" style="margin:0"></p>
           <label class="field">Other World<input name="world" required maxlength="80" placeholder="Example: BUYITEM"></label>
-          <label class="field">Price per Item (WL)<input name="price" type="number" required min="0" step="0.01" placeholder="0.5"></label>
+          <label class="field">Items per Price<input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
+          <label class="field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" value="1"></label>
+          <p class="panel-description" style="margin:0">Examples: 50 items / 1 WL = 0.02 WL per item; 1 item / 50 WL = 50 WL per item.</p>
           <div class="table-wrap">
             <table>
-              <thead><tr><th scope="col">World</th><th scope="col">Price / Item</th><th scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+              <thead><tr><th scope="col">World</th><th scope="col">Price per Bundle</th><th scope="col">Price / Item</th><th scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
               <tbody id="world-price-rows"></tbody>
             </table>
             <div class="empty-state" id="world-price-empty" hidden>No comparison prices yet.</div>
@@ -557,11 +568,16 @@
               throw new Error(`Saved bundle quantity for ${product.name} is invalid.`);
             }
             if (product.worldPrices === undefined) product.worldPrices = [];
-            if (!Array.isArray(product.worldPrices) || product.worldPrices.some((comparison) =>
-              !comparison || typeof comparison.world !== "string" || !comparison.world.trim() ||
-              !Number.isFinite(comparison.price) || comparison.price < 0
-            )) {
+            if (!Array.isArray(product.worldPrices)) {
               throw new Error(`Saved world prices for ${product.name} are invalid.`);
+            }
+            for (const comparison of product.worldPrices) {
+              if (comparison && comparison.unitsPerPrice === undefined) comparison.unitsPerPrice = 1;
+              if (!comparison || typeof comparison.world !== "string" || !comparison.world.trim() ||
+                !Number.isInteger(comparison.unitsPerPrice) || comparison.unitsPerPrice < 1 ||
+                !Number.isFinite(comparison.price) || comparison.price < 0) {
+                throw new Error(`Saved world prices for ${product.name} are invalid.`);
+              }
             }
           }
           for (const farm of data.farms) {
@@ -971,29 +987,43 @@
 
         function openCompareDialog(product) {
           comparingProductId = product.id;
-          byId("compare-form").reset();
+          const form = byId("compare-form");
+          form.reset();
           renderWorldPrices(product);
           compareDialog.showModal();
-          byId("compare-form").elements.world.focus();
+          form.elements.world.focus();
         }
 
         function renderWorldPrices(product) {
           const body = byId("world-price-rows");
           body.replaceChildren();
           const ownPrice = product.price / product.unitsPerPrice;
-          byId("compare-product-price").textContent = `Your price: ${formatWorldLocks(ownPrice)} per item`;
+          byId("compare-product-price").textContent =
+            `Your price: ${formatBundlePrice(product)} (${formatWorldLocks(ownPrice)} per item)`;
           for (const comparison of [...product.worldPrices].sort((a, b) => a.world.localeCompare(b.world))) {
-            const difference = Math.round((comparison.price - ownPrice) * 100) / 100;
+            const comparisonPrice = comparison.price / comparison.unitsPerPrice;
+            const difference = Math.round((comparisonPrice - ownPrice) * 100) / 100;
             const differenceText = difference === 0
               ? "Same price"
               : `${formatWorldLocks(Math.abs(difference))} ${difference < 0 ? "cheaper" : "higher"}`;
             const row = document.createElement("tr");
             row.append(
               makeCell(comparison.world),
-              makeCell(`${formatWorldLocks(comparison.price)} / item`),
+              makeCell(formatBundlePrice(comparison)),
+              makeCell(`${formatWorldLocks(comparisonPrice)} / item`),
               makeCell(differenceText)
             );
             row.append(makeActionsCell(makeActionButton(
+              "Edit",
+              `Edit price for ${comparison.world}`,
+              () => {
+                const form = byId("compare-form");
+                form.elements.world.value = comparison.world;
+                form.elements.unitsPerPrice.value = comparison.unitsPerPrice;
+                form.elements.price.value = comparison.price;
+                form.elements.world.focus();
+              }
+            ), makeActionButton(
               "Remove",
               `Remove price for ${comparison.world}`,
               () => removeWorldPrice(product, comparison.world),
@@ -1113,9 +1143,11 @@
           const product = state.products.find((item) => item.id === comparingProductId);
           const form = event.currentTarget;
           const world = form.elements.world.value.trim();
+          const unitsPerPrice = Number(form.elements.unitsPerPrice.value);
           const price = Number(form.elements.price.value);
-          if (!product || !world || !Number.isFinite(price) || price < 0) {
-            showToast("Enter a world name and a valid price per item.");
+          if (!product || !world || !Number.isInteger(unitsPerPrice) || unitsPerPrice < 1 ||
+            !Number.isFinite(price) || price < 0) {
+            showToast("Enter a world name, a valid item quantity, and a valid price in WL.");
             return;
           }
 
@@ -1124,7 +1156,7 @@
             entry.world.toLowerCase() === world.toLowerCase()
           );
           product.worldPrices = [...previousPrices];
-          const comparison = { world, price };
+          const comparison = { world, unitsPerPrice, price };
           if (existingIndex === -1) product.worldPrices.push(comparison);
           else product.worldPrices[existingIndex] = comparison;
           if (!await saveData()) {
