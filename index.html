@@ -371,7 +371,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th scope="col">No.</th><th scope="col">Type</th><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Date</th><th scope="col">Amount (WL)</th></tr></thead>
+            <thead><tr><th scope="col">No.</th><th scope="col">Type</th><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Date</th><th scope="col">Amount (WL)</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
             <tbody id="cashflow-rows"></tbody>
           </table>
           <div class="empty-state" id="cashflow-empty" hidden>No purchases or sales recorded yet.</div>
@@ -464,6 +464,22 @@
           <p class="panel-description" style="margin:0">Purchases matching an inventory item add to its stock. Other item names are recorded as expenses only.</p>
         </div>
         <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Save Purchase</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="cashflow-edit-dialog" aria-labelledby="cashflow-edit-title">
+      <form id="cashflow-edit-form">
+        <div class="dialog-header"><h2 id="cashflow-edit-title">Edit Cashflow Transaction</h2></div>
+        <div class="dialog-body">
+          <p id="cashflow-edit-type" class="panel-description" style="margin:0"></p>
+          <label class="field">Item<input name="productName" id="cashflow-edit-item" list="cashflow-edit-options" required maxlength="80"></label>
+          <datalist id="cashflow-edit-options"></datalist>
+          <label class="field">Quantity<input name="quantity" type="number" required min="1" step="1"></label>
+          <label class="field" id="cashflow-edit-amount-label">Amount (WL)<input name="total" type="number" required min="0" step="0.01"></label>
+          <label class="field">Date and Time<input name="date" type="datetime-local" required></label>
+          <p id="cashflow-edit-stock-note" class="panel-description" style="margin:0"></p>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Save Changes</button></div>
       </form>
     </dialog>
 
@@ -581,6 +597,7 @@
         const productDialog = byId("product-dialog");
         const saleDialog = byId("sale-dialog");
         const purchaseDialog = byId("purchase-dialog");
+        const cashflowEditDialog = byId("cashflow-edit-dialog");
         const adjustDialog = byId("adjust-dialog");
         const compareDialog = byId("compare-dialog");
         const farmDialog = byId("farm-dialog");
@@ -588,6 +605,7 @@
         let state = structuredClone(defaultData);
         let adjustingProductId = null;
         let comparingProductId = null;
+        let editingCashflowTransaction = null;
         let adjustingFarmId = null;
         let toastTimer;
         let saveQueue = Promise.resolve();
@@ -1024,6 +1042,8 @@
           const transactions = [
             ...state.sales.map((sale) => ({
               type: "Income",
+              transactionType: "sale",
+              id: sale.id,
               name: sale.productName,
               quantity: sale.quantity,
               total: sale.total,
@@ -1031,6 +1051,8 @@
             })),
             ...state.purchases.map((purchase) => ({
               type: "Expense",
+              transactionType: "purchase",
+              id: purchase.id,
               name: purchase.productName,
               quantity: purchase.quantity,
               total: purchase.total,
@@ -1050,6 +1072,12 @@
               makeCell(`${transaction.type === "Income" ? "+" : "−"} ${formatWorldLocks(transaction.total)}`,
                 transaction.type === "Income" ? "cashflow-income" : "cashflow-expense")
             );
+            row.append(makeActionsCell(
+              makeActionButton("Edit", `Edit ${transaction.type.toLowerCase()} for ${transaction.name}`,
+                () => openCashflowEditDialog(transaction.transactionType, transaction.id)),
+              makeActionButton("Delete", `Delete ${transaction.type.toLowerCase()} for ${transaction.name}`,
+                () => deleteCashflowTransaction(transaction.transactionType, transaction.id), true)
+            ));
             body.append(row);
           }
           byId("cashflow-empty").hidden = transactions.length > 0;
@@ -1057,6 +1085,156 @@
             currentPages.cashflow = nextPage;
             renderCashflow();
           });
+        }
+
+        function findCashflowProduct(transaction, type) {
+          if (transaction.productId) {
+            return state.products.find((product) => product.id === transaction.productId) || null;
+          }
+          return type === "sale"
+            ? state.products.find((product) => product.name === transaction.productName) || null
+            : null;
+        }
+
+        function dateTimeInputValue(date) {
+          const value = new Date(date);
+          const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
+          return local.toISOString().slice(0, 16);
+        }
+
+        function openCashflowEditDialog(type, id) {
+          const collection = type === "sale" ? state.sales : state.purchases;
+          const transaction = collection.find((item) => item.id === id);
+          if (!transaction) return;
+
+          const form = byId("cashflow-edit-form");
+          const product = findCashflowProduct(transaction, type);
+          const options = byId("cashflow-edit-options");
+          options.replaceChildren();
+          for (const item of state.products) {
+            const option = document.createElement("option");
+            option.value = item.name;
+            options.append(option);
+          }
+          editingCashflowTransaction = { type, id };
+          byId("cashflow-edit-type").textContent = type === "sale"
+            ? "Income from sale"
+            : "Purchase expense";
+          byId("cashflow-edit-item").value = product?.name || transaction.productName;
+          form.elements.quantity.value = transaction.quantity;
+          form.elements.total.value = transaction.total;
+          form.elements.date.value = dateTimeInputValue(transaction.date);
+          byId("cashflow-edit-stock-note").textContent = type === "sale"
+            ? "Changing a linked sale updates the corresponding stock."
+            : "Changing a linked purchase updates the corresponding stock. Untracked items remain cashflow-only.";
+          cashflowEditDialog.showModal();
+          byId("cashflow-edit-item").focus();
+        }
+
+        async function saveCashflowEdit(event) {
+          event.preventDefault();
+          if (!editingCashflowTransaction) return;
+          const { type, id } = editingCashflowTransaction;
+          const collection = type === "sale" ? state.sales : state.purchases;
+          const transaction = collection.find((item) => item.id === id);
+          const form = event.currentTarget;
+          const name = form.elements.productName.value.trim();
+          const quantity = Number(form.elements.quantity.value);
+          const total = Number(form.elements.total.value);
+          const date = new Date(form.elements.date.value);
+          if (!transaction) {
+            showToast("This cashflow transaction is no longer available.");
+            return;
+          }
+          if (!name || !Number.isSafeInteger(quantity) || quantity < 1 ||
+            !Number.isFinite(total) || total < 0 || !Number.isFinite(date.getTime())) {
+            showToast("Enter a valid item, whole-number quantity, amount, and date.");
+            return;
+          }
+
+          const previousTransaction = { ...transaction };
+          const oldProduct = findCashflowProduct(transaction, type);
+          const newProduct = oldProduct && oldProduct.name.toLowerCase() === name.toLowerCase()
+            ? oldProduct
+            : state.products.find((product) => product.name.toLowerCase() === name.toLowerCase()) || null;
+          const stockChanges = new Map();
+          const stockDeltas = new Map();
+          if (oldProduct) {
+            stockChanges.set(oldProduct, oldProduct.quantity);
+            stockDeltas.set(oldProduct, type === "sale" ? transaction.quantity : -transaction.quantity);
+          }
+          if (newProduct) {
+            if (!stockChanges.has(newProduct)) stockChanges.set(newProduct, newProduct.quantity);
+            stockDeltas.set(newProduct, (stockDeltas.get(newProduct) || 0) +
+              (type === "sale" ? -quantity : quantity));
+          }
+          const invalidStock = [...stockChanges].some(([product, previousQuantity]) => {
+            const nextQuantity = previousQuantity + stockDeltas.get(product);
+            return !Number.isSafeInteger(nextQuantity) || nextQuantity < 0;
+          });
+          if (invalidStock) {
+            for (const [product, previousQuantity] of stockChanges) product.quantity = previousQuantity;
+            showToast(type === "sale"
+              ? "The selected item does not have enough stock for this sale."
+              : "This change would make the item stock invalid.");
+            return;
+          }
+          for (const [product, previousQuantity] of stockChanges) {
+            product.quantity = previousQuantity + stockDeltas.get(product);
+          }
+
+          transaction.productId = newProduct?.id || null;
+          transaction.productName = newProduct ? newProduct.name : name;
+          transaction.quantity = quantity;
+          transaction.total = total;
+          transaction.date = date.toISOString();
+          addLog(`${type === "sale" ? "Sale income" : "Purchase expense"} updated for ${transaction.productName}: ${formatItemQuantity(quantity)}, ${formatWorldLocks(total)}.`);
+          if (!await saveData()) {
+            Object.assign(transaction, previousTransaction);
+            for (const [product, previousQuantity] of stockChanges) product.quantity = previousQuantity;
+            state.logs.pop();
+            return;
+          }
+          cashflowEditDialog.close();
+          editingCashflowTransaction = null;
+          render();
+          showToast("Cashflow transaction updated.");
+        }
+
+        async function deleteCashflowTransaction(type, id) {
+          const collection = type === "sale" ? state.sales : state.purchases;
+          const index = collection.findIndex((item) => item.id === id);
+          if (index === -1) return;
+          const transaction = collection[index];
+          const label = type === "sale" ? "sale income" : "purchase expense";
+          if (!window.confirm(`Delete this ${label} for ${transaction.productName}?`)) return;
+
+          const product = findCashflowProduct(transaction, type);
+          const previousQuantity = product?.quantity;
+          if (product && type === "purchase" && product.quantity < transaction.quantity) {
+            showToast(`Cannot delete this purchase because ${product.name} no longer has ${formatItemQuantity(transaction.quantity)} in stock.`);
+            return;
+          }
+          if (product) {
+            const nextQuantity = type === "sale"
+              ? product.quantity + transaction.quantity
+              : product.quantity - transaction.quantity;
+            if (!Number.isSafeInteger(nextQuantity) || nextQuantity < 0) {
+              showToast("Cannot delete this transaction because the resulting stock quantity would be invalid.");
+              return;
+            }
+            product.quantity = nextQuantity;
+          }
+          collection.splice(index, 1);
+          addLog(`${type === "sale" ? "Sale income" : "Purchase expense"} deleted for ${transaction.productName}; ${product ? "stock was adjusted." : "inventory was unchanged."}`);
+          if (!await saveData()) {
+            collection.splice(index, 0, transaction);
+            if (product) product.quantity = previousQuantity;
+            state.logs.pop();
+            return;
+          }
+          render();
+          showToast("Cashflow transaction deleted.");
         }
 
         function renderActivity() {
@@ -1644,6 +1822,7 @@
           form.reset();
           showToast(`${category === "ssp" ? "SSP price" : "Price"} for ${world} saved.`);
         });
+        byId("cashflow-edit-form").addEventListener("submit", saveCashflowEdit);
         byId("clear-activity-button").addEventListener("click", async () => {
           if (state.logs.length === 0) return;
           if (!window.confirm("Clear all activity log entries? This cannot be undone.")) return;
