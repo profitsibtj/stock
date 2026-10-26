@@ -106,7 +106,7 @@
       .button-primary:hover { border-color: #196444; background: #196444; }
       .summary {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 16px;
         margin-bottom: 24px;
       }
@@ -153,6 +153,7 @@
       .inventory-table .world-column { overflow: hidden; padding-right: 4px; padding-left: 4px; overflow-wrap: normal; text-overflow: ellipsis; white-space: nowrap; }
       .inventory-table .price-cheaper { color: var(--green); }
       .inventory-table .price-higher { color: var(--red); }
+      .ssp-price-input { width: 100%; min-width: 120px; height: 36px; padding: 0 9px; border: 1px solid #dfe3e7; border-radius: 7px; }
       th { position: relative; padding: 11px 22px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .055em; text-transform: uppercase; }
       td { padding: 14px 22px; border-top: 1px solid #f0f2f4; vertical-align: middle; }
       tbody tr:first-child td { border-top: 0; }
@@ -169,6 +170,8 @@
       .text-button-danger:hover { background: #fceceb; }
       .empty-state { padding: 35px 20px; color: var(--muted); text-align: center; }
       .sales-total { color: var(--green); font-weight: 700; }
+      .cashflow-income { color: var(--green); font-weight: 700; }
+      .cashflow-expense { color: var(--red); font-weight: 700; }
       .visually-hidden {
         position: absolute;
         width: 1px;
@@ -202,6 +205,10 @@
       }
       #compare-dialog { width: min(900px, calc(100% - 32px)); }
       dialog::backdrop { background: rgb(22 29 35 / 35%); }
+      #compare-dialog { max-height: 90vh; overflow: hidden; }
+      #compare-dialog form { display: flex; max-height: 90vh; flex-direction: column; }
+      #compare-dialog .dialog-body { min-height: 0; overflow-y: auto; }
+      #compare-dialog .dialog-footer { flex-shrink: 0; }
       .dialog-header { padding: 20px 22px 15px; border-bottom: 1px solid var(--line); }
       .dialog-header h2 { font-size: 18px; }
       .dialog-body { display: grid; gap: 14px; padding: 19px 22px; }
@@ -227,7 +234,7 @@
         main { width: calc(100% - 32px); margin-top: 20px; }
         .heading { align-items: flex-start; flex-direction: column; }
         .heading-actions { width: 100%; }
-        .summary { gap: 9px; }
+        .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
         .summary-card { min-height: 100px; padding: 14px; }
         .summary-value { font-size: 24px; }
         .summary-note { font-size: 11px; }
@@ -292,7 +299,17 @@
         <article class="summary-card">
           <span class="summary-label">Sales Revenue</span>
           <strong class="summary-value" id="sales-revenue">0 WL</strong>
-          <span class="summary-note">Total sales in World Lock</span>
+          <span class="summary-note">Total income from sales</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Purchase Expenses</span>
+          <strong class="summary-value" id="purchase-expenses">0 WL</strong>
+          <span class="summary-note">Total spent on stock</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Net Cashflow</span>
+          <strong class="summary-value" id="net-cashflow">0 WL</strong>
+          <span class="summary-note">Sales income minus purchases</span>
         </article>
       </section>
 
@@ -342,6 +359,24 @@
           <div class="empty-state" id="sales-search-empty" hidden>Sale not found.</div>
         </div>
         <nav class="pagination" id="sales-pagination" aria-label="Sales pages" hidden></nav>
+      </section>
+
+      <section class="panel" aria-labelledby="cashflow-heading">
+        <div class="panel-heading">
+          <div>
+            <h2 id="cashflow-heading">Cashflow</h2>
+            <p class="panel-description">Track WL received from sales and spent on purchases.</p>
+          </div>
+          <button class="button button-primary" id="record-purchase-button" type="button">＋ Record Purchase</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">No.</th><th scope="col">Type</th><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Date</th><th scope="col">Amount (WL)</th></tr></thead>
+            <tbody id="cashflow-rows"></tbody>
+          </table>
+          <div class="empty-state" id="cashflow-empty" hidden>No purchases or sales recorded yet.</div>
+        </div>
+        <nav class="pagination" id="cashflow-pagination" aria-label="Cashflow pages" hidden></nav>
       </section>
 
       <section class="panel" aria-labelledby="activity-heading">
@@ -412,9 +447,23 @@
         <div class="dialog-body">
           <label class="field">Item<select name="product" id="sale-product" required></select></label>
           <label class="field">Items Sold<input name="quantity" type="number" required min="1" step="1" value="1"></label>
-          <p id="sale-total-preview" class="panel-description" aria-live="polite" style="margin:0"></p>
+          <label class="field">Total Received (WL)<input name="total" type="number" required min="0" step="0.01" value="0"></label>
+          <p id="sale-total-preview" class="panel-description" aria-live="polite" style="margin:0">Adjust the received amount if it differs from the listed price.</p>
         </div>
         <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Record Sale</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="purchase-dialog" aria-labelledby="purchase-dialog-title">
+      <form id="purchase-form">
+        <div class="dialog-header"><h2 id="purchase-dialog-title">Record Purchase</h2></div>
+        <div class="dialog-body">
+          <label class="field">Item<input name="productName" id="purchase-product-name" list="purchase-product-options" required maxlength="80" placeholder="Type any item name"><datalist id="purchase-product-options"></datalist></label>
+          <label class="field">Quantity Bought<input name="quantity" type="number" required min="1" step="1" value="1"></label>
+          <label class="field">Total Spent (WL)<input name="total" type="number" required min="0" step="0.01" value="0"></label>
+          <p class="panel-description" style="margin:0">Purchases matching an inventory item add to its stock. Other item names are recorded as expenses only.</p>
+        </div>
+        <div class="dialog-footer"><button class="button" type="button" data-close>Cancel</button><button class="button button-primary" type="submit">Save Purchase</button></div>
       </form>
     </dialog>
 
@@ -437,18 +486,36 @@
       <form id="compare-form">
         <div class="dialog-header"><h2 id="compare-dialog-title">Compare World Prices</h2></div>
         <div class="dialog-body">
-          <label class="field" id="compare-product-field"><span id="compare-product-label">Item</span><select name="product" id="compare-product" required></select></label>
-          <p id="compare-product-price" class="panel-description" style="margin:0"></p>
-          <label class="field">Other World<input name="world" required maxlength="80" placeholder="Example: BUYITEM"></label>
-          <label class="field" id="compare-quantity-field"><span id="compare-quantity-label">Items per Price</span><input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
-          <label class="field" id="compare-price-field">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" value="1"></label>
-          <p class="panel-description" id="compare-help" style="margin:0">Examples: 50 items / 1 WL = 0.02 WL per item; 1 item / 50 WL = 50 WL per item.</p>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th scope="col">World</th><th id="compare-value-heading" scope="col">Price per Bundle</th><th id="compare-unit-heading" scope="col">Price / Item</th><th id="compare-difference-heading" scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
-              <tbody id="world-price-rows"></tbody>
-            </table>
-            <div class="empty-state" id="world-price-empty" hidden>No comparison prices yet.</div>
+          <div id="general-compare-panel">
+            <label class="field" id="compare-product-field"><span id="compare-product-label">Item</span><select name="product" id="compare-product" required></select></label>
+            <p id="compare-product-price" class="panel-description" style="margin:14px 0 0"></p>
+            <label class="field" style="margin-top:14px">Other World<input name="world" required maxlength="80" placeholder="Example: BUYITEM"></label>
+            <label class="field" id="compare-quantity-field" style="margin-top:14px"><span id="compare-quantity-label">Items per Price</span><input name="unitsPerPrice" type="number" required min="1" step="1" value="1"></label>
+            <label class="field" id="compare-price-field" style="margin-top:14px">Price for That Quantity (WL)<input name="price" type="number" required min="0" step="0.01" value="1"></label>
+            <p class="panel-description" id="compare-help" style="margin:14px 0 0">Examples: 50 items / 1 WL = 0.02 WL per item; 1 item / 50 WL = 50 WL per item.</p>
+            <div class="table-wrap" style="margin-top:14px">
+              <table>
+                <thead><tr><th scope="col">World</th><th id="compare-value-heading" scope="col">Price per Bundle</th><th id="compare-unit-heading" scope="col">Price / Item</th><th id="compare-difference-heading" scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody id="world-price-rows"></tbody>
+              </table>
+              <div class="empty-state" id="world-price-empty" hidden>No comparison prices yet.</div>
+            </div>
+          </div>
+          <div id="ssp-compare-panel" hidden>
+            <label class="field">World
+              <select id="ssp-world-select" aria-label="Choose SSP comparison world"></select>
+            </label>
+            <label class="field" id="ssp-new-world-field" hidden>New World Name
+              <input id="ssp-new-world" maxlength="80" placeholder="Example: SSPGEL">
+            </label>
+            <p class="panel-description" style="margin:0">Enter how many seeds each item sells for 1 WL in this world.</p>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th scope="col">SSP Item</th><th scope="col">Your Seeds / WL</th><th scope="col">World Seeds / WL</th><th scope="col">Difference</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody id="ssp-world-price-rows"></tbody>
+              </table>
+              <div class="empty-state" id="ssp-world-price-empty" hidden>No SSP items available. Add products to the SSP category first.</div>
+            </div>
           </div>
         </div>
         <div class="dialog-footer"><button class="button" type="button" data-close>Close</button><button class="button button-primary" id="compare-save-button" type="submit">Save Price</button></div>
@@ -509,10 +576,11 @@
         const dateOnlyFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
         const clockFormat = new Intl.DateTimeFormat("en-US", { timeStyle: "medium" });
         const formatWorldLocks = (amount) => `${worldLocks.format(amount)} WL`;
-        const defaultData = { products: [], sales: [], logs: [], farms: [] };
+        const defaultData = { products: [], sales: [], purchases: [], logs: [], farms: [] };
         const byId = (id) => document.getElementById(id);
         const productDialog = byId("product-dialog");
         const saleDialog = byId("sale-dialog");
+        const purchaseDialog = byId("purchase-dialog");
         const adjustDialog = byId("adjust-dialog");
         const compareDialog = byId("compare-dialog");
         const farmDialog = byId("farm-dialog");
@@ -523,7 +591,7 @@
         let adjustingFarmId = null;
         let toastTimer;
         let saveQueue = Promise.resolve();
-        const currentPages = { inventory: 1, sales: 1, activity: 1 };
+        const currentPages = { inventory: 1, sales: 1, cashflow: 1, activity: 1 };
         const farmTimers = new Map();
         const farmCheckboxes = new Map();
 
@@ -591,6 +659,17 @@
           if (!Array.isArray(data.logs)) throw new Error("The shared activity log has an invalid format.");
           if (data.farms === undefined) data.farms = [];
           if (!Array.isArray(data.farms)) throw new Error("The shared farm tracker data has an invalid format.");
+          if (data.purchases === undefined) data.purchases = [];
+          if (!Array.isArray(data.purchases)) throw new Error("The shared purchase history has an invalid format.");
+          for (const purchase of data.purchases) {
+            if (!purchase || typeof purchase.id !== "string" ||
+              (purchase.productId !== null && typeof purchase.productId !== "string") ||
+              typeof purchase.productName !== "string" || !Number.isInteger(purchase.quantity) ||
+              purchase.quantity < 1 || !Number.isFinite(purchase.total) || purchase.total < 0 ||
+              !Number.isFinite(Date.parse(purchase.date))) {
+              throw new Error("The shared purchase history contains invalid purchase data.");
+            }
+          }
           for (const product of data.products) {
             if (product.category === undefined) product.category = "general";
             if (product.category !== "general" && product.category !== "ssp") {
@@ -607,7 +686,7 @@
             for (const comparison of product.worldPrices) {
               if (comparison && comparison.unitsPerPrice === undefined) comparison.unitsPerPrice = 1;
               if (!comparison || typeof comparison.world !== "string" || !comparison.world.trim() ||
-                !Number.isFinite(comparison.unitsPerPrice) || comparison.unitsPerPrice < 1 ||
+                !Number.isFinite(comparison.unitsPerPrice) || comparison.unitsPerPrice <= 0 ||
                 !Number.isFinite(comparison.price) || comparison.price < 0) {
                 throw new Error(`Saved world prices for ${product.name} are invalid.`);
               }
@@ -940,6 +1019,46 @@
           });
         }
 
+        function renderCashflow() {
+          const body = byId("cashflow-rows");
+          const transactions = [
+            ...state.sales.map((sale) => ({
+              type: "Income",
+              name: sale.productName,
+              quantity: sale.quantity,
+              total: sale.total,
+              date: sale.date
+            })),
+            ...state.purchases.map((purchase) => ({
+              type: "Expense",
+              name: purchase.productName,
+              quantity: purchase.quantity,
+              total: purchase.total,
+              date: purchase.date
+            }))
+          ].sort((a, b) => new Date(b.date) - new Date(a.date));
+          body.replaceChildren();
+          const { page, start, items } = getPage(transactions, "cashflow");
+          for (const [index, transaction] of items.entries()) {
+            const row = document.createElement("tr");
+            row.append(
+              makeCell(String(start + index + 1)),
+              makeCell(transaction.type, transaction.type === "Income" ? "cashflow-income" : "cashflow-expense"),
+              makeCell(transaction.name),
+              makeCell(formatItemQuantity(transaction.quantity)),
+              makeCell(dateFormat.format(new Date(transaction.date))),
+              makeCell(`${transaction.type === "Income" ? "+" : "−"} ${formatWorldLocks(transaction.total)}`,
+                transaction.type === "Income" ? "cashflow-income" : "cashflow-expense")
+            );
+            body.append(row);
+          }
+          byId("cashflow-empty").hidden = transactions.length > 0;
+          renderPagination("cashflow-pagination", transactions.length, page, (nextPage) => {
+            currentPages.cashflow = nextPage;
+            renderCashflow();
+          });
+        }
+
         function renderActivity() {
           const body = byId("activity-rows");
           body.replaceChildren();
@@ -1056,9 +1175,15 @@
         function renderSummary() {
           const stockCount = state.products.reduce((total, product) => total + product.quantity, 0);
           const revenue = state.sales.reduce((total, sale) => total + sale.total, 0);
+          const expenses = state.purchases.reduce((total, purchase) => total + purchase.total, 0);
           byId("stock-total").textContent = stockCount.toLocaleString("en-US");
           byId("stock-note").textContent = `Across ${state.products.length} item${state.products.length === 1 ? "" : "s"}`;
           byId("sales-revenue").textContent = formatWorldLocks(revenue);
+          byId("purchase-expenses").textContent = formatWorldLocks(expenses);
+          const netCashflow = revenue - expenses;
+          byId("net-cashflow").textContent = formatWorldLocks(netCashflow);
+          byId("net-cashflow").classList.toggle("cashflow-expense", netCashflow < 0);
+          byId("net-cashflow").classList.toggle("sales-total", netCashflow >= 0);
         }
 
         function render() {
@@ -1068,6 +1193,7 @@
           renderSummary();
           renderInventory();
           renderSales();
+          renderCashflow();
           renderActivity();
           renderFarms();
         }
@@ -1096,30 +1222,56 @@
             return;
           }
           compareDialog.dataset.category = category;
-          byId("compare-product").replaceChildren(...products.map((product) => {
-            const option = document.createElement("option");
-            option.value = product.id;
-            option.textContent = product.name;
-            return option;
-          }));
-          comparingProductId = products.some((product) => product.id === productId)
-            ? productId
-            : products[0].id;
-          byId("compare-product").value = comparingProductId;
           const isSsp = category === "ssp";
+          byId("general-compare-panel").hidden = isSsp;
+          byId("ssp-compare-panel").hidden = !isSsp;
+          for (const control of byId("general-compare-panel").querySelectorAll("input, select")) {
+            control.disabled = isSsp;
+          }
+          for (const control of byId("ssp-compare-panel").querySelectorAll("input, select")) {
+            control.disabled = !isSsp;
+          }
+          byId("ssp-new-world").required = false;
           byId("compare-dialog-title").textContent = isSsp ? "Compare SSP Prices" : "Compare World Prices";
-          byId("compare-product-label").textContent = isSsp ? "SSP Item" : "Item";
-          byId("compare-quantity-label").textContent = isSsp ? "Seeds per 1 WL" : "Items per Price";
-          byId("compare-price-field").hidden = isSsp;
-          byId("compare-help").hidden = isSsp;
-          byId("compare-value-heading").hidden = isSsp;
-          byId("compare-unit-heading").textContent = isSsp ? "Seeds / WL" : "Price / Item";
-          byId("compare-difference-heading").hidden = false;
-          form.elements.unitsPerPrice.step = isSsp ? "0.01" : "1";
-          form.elements.unitsPerPrice.min = isSsp ? "0.01" : "1";
-          renderWorldPrices(state.products.find((product) => product.id === comparingProductId));
+          if (isSsp) {
+            const worlds = [...new Map(products.flatMap((product) => product.worldPrices)
+              .map((comparison) => [comparison.world.toLowerCase(), comparison.world])).values()]
+              .sort((a, b) => a.localeCompare(b));
+            const worldSelect = byId("ssp-world-select");
+            worldSelect.replaceChildren();
+            for (const world of worlds) {
+              const option = document.createElement("option");
+              option.value = world;
+              option.textContent = world;
+              worldSelect.append(option);
+            }
+            const newWorldOption = document.createElement("option");
+            newWorldOption.value = "__new__";
+            newWorldOption.textContent = "＋ Add new world…";
+            worldSelect.append(newWorldOption);
+            worldSelect.value = worlds[0] || "__new__";
+            byId("ssp-new-world-field").hidden = worldSelect.value !== "__new__";
+            byId("ssp-new-world").required = worldSelect.value === "__new__";
+            byId("compare-save-button").textContent = "Save World Prices";
+            renderSspWorldPriceRows(worldSelect.value === "__new__" ? "" : worldSelect.value);
+          } else {
+            byId("compare-save-button").textContent = "Save Price";
+            byId("compare-product").replaceChildren(...products.map((product) => {
+              const option = document.createElement("option");
+              option.value = product.id;
+              option.textContent = product.name;
+              return option;
+            }));
+            comparingProductId = products.some((product) => product.id === productId)
+              ? productId
+              : products[0].id;
+            byId("compare-product").value = comparingProductId;
+            renderWorldPrices(state.products.find((product) => product.id === comparingProductId));
+          }
           compareDialog.showModal();
-          form.elements.world.focus();
+          if (isSsp && byId("ssp-new-world-field").hidden) byId("ssp-world-select").focus();
+          else if (isSsp) byId("ssp-new-world").focus();
+          else form.elements.world.focus();
         }
 
         function editWorldPrice(product, comparison) {
@@ -1188,16 +1340,137 @@
           byId("world-price-empty").hidden = product.worldPrices.length > 0;
         }
 
+        function renderSspWorldPriceRows(world) {
+          const body = byId("ssp-world-price-rows");
+          const products = state.products.filter((product) => product.category === "ssp");
+          body.replaceChildren();
+          for (const product of products) {
+            const comparison = product.worldPrices.find((entry) =>
+              entry.world.toLowerCase() === world.toLowerCase()
+            );
+            const ownSeeds = product.price === 0 ? null : product.unitsPerPrice / product.price;
+            const worldSeeds = comparison ? comparison.unitsPerPrice / comparison.price : null;
+            const row = document.createElement("tr");
+            row.append(
+              makeCell(product.name, "item-name"),
+              makeCell(ownSeeds === null ? "Free" : `${worldLocks.format(ownSeeds)} seeds / WL`)
+            );
+            const priceCell = document.createElement("td");
+            const input = document.createElement("input");
+            input.className = "ssp-price-input";
+            input.type = "number";
+            input.min = "0.01";
+            input.step = "0.01";
+            input.value = worldSeeds === null ? "" : String(worldSeeds);
+            input.placeholder = "Enter seeds / WL";
+            input.dataset.productId = product.id;
+            input.setAttribute("aria-label", `${product.name} seeds per WL in ${world || "new world"}`);
+            priceCell.append(input);
+            row.append(priceCell);
+            const difference = ownSeeds === null || worldSeeds === null
+              ? "—"
+              : Math.round((worldSeeds - ownSeeds) * 100) / 100;
+            row.append(makeCell(
+              typeof difference === "number"
+                ? difference === 0
+                  ? "Same amount"
+                  : `${worldLocks.format(Math.abs(difference))} seeds ${difference > 0 ? "more" : "fewer"}`
+                : difference
+            ));
+            const actions = comparison
+              ? makeActionButton(
+                "Remove",
+                `Remove ${product.name} price for ${world}`,
+                () => removeWorldPrice(product, world),
+                true
+              )
+              : null;
+            row.append(actions ? makeActionsCell(actions) : document.createElement("td"));
+            body.append(row);
+          }
+          byId("ssp-world-price-empty").hidden = products.length > 0;
+        }
+
+        async function saveSspWorldPrices() {
+          const products = state.products.filter((product) => product.category === "ssp");
+          const isNewWorld = byId("ssp-world-select").value === "__new__";
+          const requestedWorld = isNewWorld
+            ? byId("ssp-new-world").value.trim()
+            : byId("ssp-world-select").value;
+          const inputRows = [...byId("ssp-world-price-rows").querySelectorAll("input")];
+          const enteredPrices = inputRows.filter((input) => input.value.trim() !== "");
+          if (!requestedWorld || requestedWorld.length > 80 || enteredPrices.length === 0) {
+            showToast("Enter a world name and at least one SSP price in seeds per WL.");
+            return;
+          }
+          if (enteredPrices.some((input) =>
+            !Number.isFinite(Number(input.value)) || Number(input.value) <= 0
+          )) {
+            showToast("SSP prices must be greater than zero seeds per WL.");
+            return;
+          }
+
+          const existingWorld = products.flatMap((product) => product.worldPrices)
+            .find((comparison) => comparison.world.toLowerCase() === requestedWorld.toLowerCase());
+          const world = existingWorld ? existingWorld.world : requestedWorld;
+          const previousPrices = new Map(products.map((product) =>
+            [product.id, product.worldPrices]
+          ));
+          for (const input of enteredPrices) {
+            const product = products.find((item) => item.id === input.dataset.productId);
+            if (!product) continue;
+            const value = Number(input.value);
+            const comparisons = [...product.worldPrices];
+            const index = comparisons.findIndex((comparison) =>
+              comparison.world.toLowerCase() === world.toLowerCase()
+            );
+            const comparison = { world, unitsPerPrice: value, price: 1 };
+            if (index === -1) comparisons.push(comparison);
+            else comparisons[index] = comparison;
+            product.worldPrices = comparisons;
+          }
+          if (!await saveData()) {
+            for (const product of products) product.worldPrices = previousPrices.get(product.id);
+            renderSspWorldPriceRows(world);
+            return;
+          }
+          renderInventory();
+          const worldSelect = byId("ssp-world-select");
+          let worldOption = [...worldSelect.options].find((option) =>
+            option.value.toLowerCase() === world.toLowerCase()
+          );
+          if (!worldOption) {
+            worldOption = document.createElement("option");
+            worldOption.value = world;
+            worldOption.textContent = world;
+            worldSelect.insertBefore(worldOption, worldSelect.lastElementChild);
+          }
+          worldSelect.value = world;
+          byId("ssp-new-world-field").hidden = true;
+          byId("ssp-new-world").required = false;
+          byId("ssp-new-world").value = "";
+          renderSspWorldPriceRows(world);
+          showToast(`SSP prices for ${world} saved.`);
+        }
+
         async function removeWorldPrice(product, world) {
           const previousPrices = product.worldPrices;
           product.worldPrices = previousPrices.filter((entry) => entry.world !== world);
           if (!await saveData()) {
             product.worldPrices = previousPrices;
-            renderWorldPrices(product);
+            if (product.category === "ssp" && compareDialog.dataset.category === "ssp") {
+              renderSspWorldPriceRows(byId("ssp-world-select").value);
+            } else {
+              renderWorldPrices(product);
+            }
             renderInventory();
             return;
           }
-          renderWorldPrices(product);
+          if (product.category === "ssp" && compareDialog.dataset.category === "ssp") {
+            renderSspWorldPriceRows(byId("ssp-world-select").value);
+          } else {
+            renderWorldPrices(product);
+          }
           renderInventory();
           showToast(`Comparison price for ${world} removed.`);
         }
@@ -1297,6 +1570,29 @@
           comparingProductId = event.currentTarget.value;
           renderWorldPrices(state.products.find((product) => product.id === comparingProductId));
         });
+        byId("ssp-world-select").addEventListener("change", (event) => {
+          const isNewWorld = event.currentTarget.value === "__new__";
+          byId("ssp-new-world-field").hidden = !isNewWorld;
+          byId("ssp-new-world").required = isNewWorld;
+          renderSspWorldPriceRows(isNewWorld ? "" : event.currentTarget.value);
+          if (isNewWorld) byId("ssp-new-world").focus();
+        });
+        byId("ssp-world-price-rows").addEventListener("input", (event) => {
+          const input = event.target;
+          if (!(input instanceof HTMLInputElement)) return;
+          const product = state.products.find((item) => item.id === input.dataset.productId);
+          const differenceCell = input.closest("tr").cells[3];
+          const ownSeeds = product && product.price > 0 ? product.unitsPerPrice / product.price : null;
+          const worldSeeds = Number(input.value);
+          if (ownSeeds === null || input.value === "" || !Number.isFinite(worldSeeds)) {
+            differenceCell.textContent = "—";
+            return;
+          }
+          const difference = Math.round((worldSeeds - ownSeeds) * 100) / 100;
+          differenceCell.textContent = difference === 0
+            ? "Same amount"
+            : `${worldLocks.format(Math.abs(difference))} seeds ${difference > 0 ? "more" : "fewer"}`;
+        });
         byId("inventory-status-filter").addEventListener("change", () => {
           currentPages.inventory = 1;
           renderInventory();
@@ -1309,6 +1605,10 @@
           event.preventDefault();
           const form = event.currentTarget;
           const category = compareDialog.dataset.category;
+          if (category === "ssp") {
+            await saveSspWorldPrices();
+            return;
+          }
           comparingProductId = form.elements.product.value;
           const product = state.products.find((item) => item.id === comparingProductId);
           const world = form.elements.world.value.trim();
@@ -1386,6 +1686,63 @@
           byId("farm-form").reset();
           farmDialog.showModal();
           byId("farm-form").elements.world.focus();
+        });
+
+        byId("record-purchase-button").addEventListener("click", () => {
+          const form = byId("purchase-form");
+          const options = byId("purchase-product-options");
+          options.replaceChildren();
+          for (const product of state.products) {
+            const option = document.createElement("option");
+            option.value = product.name;
+            option.label = `${product.category === "ssp" ? "SSP" : "General"} — ${product.quantity} in stock`;
+            options.append(option);
+          }
+          form.reset();
+          purchaseDialog.showModal();
+          form.elements.productName.focus();
+        });
+
+        byId("purchase-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const productName = form.elements.productName.value.trim();
+          const product = state.products.find((item) =>
+            item.name.toLowerCase() === productName.toLowerCase()
+          );
+          const quantity = Number(form.elements.quantity.value);
+          const total = Number(form.elements.total.value);
+          if (!productName || !Number.isSafeInteger(quantity) || quantity < 1 ||
+            !Number.isFinite(total) || total < 0 ||
+            (product && !Number.isSafeInteger(product.quantity + quantity))) {
+            showToast("Enter a valid item, whole-number purchase quantity, and total WL spent.");
+            return;
+          }
+          const purchase = {
+            id: crypto.randomUUID(),
+            productId: product ? product.id : null,
+            productName: product ? product.name : productName,
+            quantity,
+            total,
+            date: new Date().toISOString()
+          };
+          const previousQuantity = product ? product.quantity : null;
+          if (product) product.quantity += quantity;
+          state.purchases.push(purchase);
+          addLog(product
+            ? `Purchase recorded: ${formatItemQuantity(quantity)} of ${product.name} for ${formatWorldLocks(total)}; stock updated from ${previousQuantity} to ${product.quantity}.`
+            : `Purchase recorded: ${formatItemQuantity(quantity)} of ${productName} for ${formatWorldLocks(total)}; item is not tracked in inventory.`);
+          if (!await saveData()) {
+            if (product) product.quantity = previousQuantity;
+            state.purchases.pop();
+            state.logs.pop();
+            return;
+          }
+          purchaseDialog.close();
+          render();
+          showToast(product
+            ? `Purchase recorded and stock updated for ${product.name}.`
+            : `Purchase expense recorded for ${productName}; inventory was not changed.`);
         });
 
         byId("farm-form").addEventListener("submit", async (event) => {
@@ -1531,7 +1888,9 @@
             return;
           }
           const total = Math.round(product.price * (quantity / product.unitsPerPrice) * 100) / 100;
-          byId("sale-total-preview").textContent = `Total: ${formatWorldLocks(total)}`;
+          form.elements.total.value = total.toFixed(2);
+          byId("sale-total-preview").textContent =
+            `Estimated total: ${formatWorldLocks(total)}. Edit the received amount above if needed.`;
         }
 
         byId("sale-form").elements.product.addEventListener("change", updateSaleTotal);
@@ -1542,13 +1901,10 @@
           const form = event.currentTarget;
           const product = state.products.find((item) => item.id === form.elements.product.value);
           const quantity = Number(form.elements.quantity.value);
-          if (!product || !Number.isInteger(quantity) || quantity < 1 || quantity > product.quantity) {
+          const total = Number(form.elements.total.value);
+          if (!product || !Number.isInteger(quantity) || quantity < 1 || quantity > product.quantity ||
+            !Number.isFinite(total) || total < 0) {
             showToast("Enter a valid quantity that is available in stock.");
-            return;
-          }
-          const total = Math.round(product.price * (quantity / product.unitsPerPrice) * 100) / 100;
-          if (!Number.isFinite(total)) {
-            showToast("The sale total is too large to calculate.");
             return;
           }
           const sale = {
